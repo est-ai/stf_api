@@ -104,7 +104,7 @@ def get_valid_end(path, end=None, stride=1):
         vid.close()
         return  get_valid_end(path, end, stride)
     
-def extract_frame(path, start=0, end=-1, stride=1):
+def extract_frame(path, start=0, end=-1, stride=1, verbose=False):
     val_end = get_valid_end(path, end, stride)
     
     vid = imageio.get_reader(path, 'ffmpeg')
@@ -114,7 +114,7 @@ def extract_frame(path, start=0, end=-1, stride=1):
         end = val_end
            
     frames = {} 
-    for i in tqdm(range(start, end, stride), desc=f'extract frame stride({stride}) {Path(path).name}'):        
+    for i in tqdm(range(start, end, stride), desc=f'extract frame stride({stride}) {Path(path).name}', disable=not verbose):
         try:
             f = vid.get_data(i) 
         except:
@@ -127,8 +127,8 @@ def extract_frame(path, start=0, end=-1, stride=1):
     
 
 # 비디오에 나오는 얼굴 임베딩값 구하는 유틸
-def calc_ebds_from_images(frames):
-    face_infos = {idx:find_face(frame)[0] for idx, frame in tqdm(frames.items(), desc='find_faces for calc_ebd')}
+def calc_ebds_from_images(frames, verbose=False):
+    face_infos = {idx:find_face(frame)[0] for idx, frame in tqdm(frames.items(), desc='find_faces for calc_ebd', disable=not verbose)}
     for idx, fi in face_infos.items():
         fi['frame_idx'] = idx 
     return pd.concat(face_infos, ignore_index=True)
@@ -165,8 +165,8 @@ def get_filtered_face(df_face_info, sim_th=0.7):
     df = df.query('@sim_th <= similaraty')   
     return df
     
-def get_face_info_(frames, ebd_아나운서, sim_th):
-    df_face_info = calc_ebds_from_images(frames)
+def get_face_info_(frames, ebd_아나운서, sim_th, verbose=False):
+    df_face_info = calc_ebds_from_images(frames, verbose=verbose)
     df_face_info = df_face_info.dropna(axis=0)
 
     calc_sim = lambda ebd: (ebd_아나운서 * ebd).sum().item()
@@ -176,9 +176,9 @@ def get_face_info_(frames, ebd_아나운서, sim_th):
     # 유사도 기반으로 아나운서 얼굴만 필터(실제로는 먼저 가장 유사한 얼굴만 골라내기)
     return frames, df_face_info, get_filtered_face(df_face_info, sim_th)
 
-def get_face_info(path, ebd_아나운서, start=0, end=-1, stride=1, sim_th=0.7):
-    frames = extract_frame(path, start, end, stride)
-    return get_face_info_(frames, ebd_아나운서,  sim_th)
+def get_face_info(path, ebd_아나운서, start=0, end=-1, stride=1, sim_th=0.7, verbose=False):
+    frames = extract_frame(path, start, end, stride, verbose=verbose)
+    return get_face_info_(frames, ebd_아나운서,  sim_th, verbose=verbose)
 
 def get_face_idxs(mp4_path, meta):
     STEP_SECONDS = 1
@@ -278,13 +278,14 @@ def face_info_to_anchor(df, val_end=None):
     return df_face_info
 
 
-def save_face_info2(mp4_path, ebd_아나운서, base='./'):
+def save_face_info2(mp4_path, ebd_아나운서, base='./', verbose=False):
     df_face_info_path = os.path.join(base,'df_face_info', f"{str(Path(mp4_path).stem)}.pickle")
-    print('save_face_info2 - df_face_info: ', str(df_face_info_path))
+    if verbose:
+        print('save_face_info2 - df_face_info: ', str(df_face_info_path))
     
     if not Path(df_face_info_path).exists():
         fps = video_meta(mp4_path)['fps']
-        r = get_face_info(mp4_path, ebd_아나운서, 0, -1, stride=round(fps)*1)
+        r = get_face_info(mp4_path, ebd_아나운서, 0, -1, stride=round(fps)*1, verbose=verbose)
         frames, df_face_info, df_아나운서_only  = r
         del frames
         gc.collect()
@@ -292,7 +293,8 @@ def save_face_info2(mp4_path, ebd_아나운서, base='./'):
         df_face_info.to_pickle(df_face_info_path)
         
     dst = Path(base) / 'df_anchor_i' / f"{Path(df_face_info_path).stem}_000.pickle"
-    print('df_anchor_i:', str(dst))
+    if verbose:
+        print('df_anchor_i:', str(dst))
     if not Path(dst).exists():      
         val_end = get_valid_end(mp4_path, end=None, stride=1)
         os.makedirs(os.path.dirname(dst), exist_ok=True)

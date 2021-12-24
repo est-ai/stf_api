@@ -31,7 +31,7 @@ def preprocess_template(config_path, template_video_path, reference_face, work_r
         g_anchor_ebd = df_face['ebd'].values[0]
 
         # 템플릿 동영상에서 아나운서 얼굴 위치만 저장해 놓는다
-        df_paths = ff.save_face_info2(template_video_path, g_anchor_ebd, base=preprocess_dir)
+        df_paths = ff.save_face_info2(template_video_path, g_anchor_ebd, base=preprocess_dir, verbose=verbose)
 
         ### 얼굴 영역을 FAN 랜드마크 기반으로 크롭해 놓는다
         assert len(df_paths) == 1
@@ -42,6 +42,7 @@ def preprocess_template(config_path, template_video_path, reference_face, work_r
                                          out_dir=crop_mp4,
                                          crop_offset_y = config.crop_offset_y,
                                          crop_margin = config.crop_margin,
+                                         verbose=verbose,
                                          )
         # snow : for debug
         if verbose:

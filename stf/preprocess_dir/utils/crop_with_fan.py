@@ -73,7 +73,7 @@ def face_detect_fan(img, type3d = False):
     except:
         return None, None 
     
-def get_anchor_box(df_anchor, offset_y, margin, size_stride = 32):
+def get_anchor_box(df_anchor, offset_y, margin, size_stride = 32, verbose=False):
     # 면적 평균을 구하고 너무(?) 작거나 큰 얼굴은 제거
     desc = df_anchor['area'].describe()
     area_25, area_75 = desc['25%'], desc['75%']
@@ -100,10 +100,11 @@ def get_anchor_box(df_anchor, offset_y, margin, size_stride = 32):
     y1 = max(0, y1)
     
     mean_box = [x1, y1, x1+size_step_x-1, y1+size_step_y-1]
-    print('mean_box:', mean_box, '  width:', size_step_x, ' height:', size_step_y)
+    if verbose:
+        print('mean_box:', mean_box, '  width:', size_step_x, ' height:', size_step_y)
     return mean_box
 
-def df_fan_info(frames, box):
+def df_fan_info(frames, box, verbose=False):
     x1, y1, x2, y2 = box
     
     def fan_info(f):
@@ -122,7 +123,7 @@ def df_fan_info(frames, box):
             pts3d = pts3d + (x1y1 +(0,))
         return box, pts2d, pts3d
     
-    fi = [fan_info(frames[idx]) for idx in tqdm(frames, desc='■ fan ')]
+    fi = [fan_info(frames[idx]) for idx in tqdm(frames, desc='■ fan ', disable=not verbose)]
     fi = [to_full(*info, (x1, y1)) for info in fi]
     
     df = pd.DataFrame(fi, columns=['box', 'pts2d', 'pts3d'])
@@ -186,7 +187,7 @@ def save_audio(mp4_path, audio_path):
     
     
 def save_crop_info(anchor_box_path, mp4_path, out_dir, make_mp4=False, 
-                   crop_offset_y = -0.1, crop_margin=0.4):
+                   crop_offset_y = -0.1, crop_margin=0.4, verbose=False):
     df_anchor_i = pd.read_pickle(anchor_box_path)
     
     # 얼굴이 모두 들어가는 박스 크기를 구한다.
@@ -212,7 +213,7 @@ def save_crop_info(anchor_box_path, mp4_path, out_dir, make_mp4=False,
     frames = ff.extract_frame(mp4_path, min_idx, max_idx+1)
     
     # FAN 이 얼굴과 피처 포인트를 구한다.
-    df = df_fan_info(frames, box)
+    df = df_fan_info(frames, box, verbose=verbose)
     
     # 모델에 입력할 박스를 다시 구해서 crop 한다.
     # crop 박스 영역은 피쳐 포인트 기반으로 구한다.
