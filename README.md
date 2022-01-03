@@ -17,4 +17,4 @@ $ pip install -r requirements.txt
 ```
 
 # Release
-* 2021/12/30 : https://drive.google.com/drive/folders/1ly1cxNvmQhU6l_Y6ccLnLfbJbprmhBR3
+* 2021/12/30 : https://drive.google.com/drive/folders/1abifSj7SO2v_zMBu98EWDJ8c4UPkJ2-M
