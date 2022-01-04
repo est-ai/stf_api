@@ -39,7 +39,7 @@ def audio_crop(wav_std, wav_std_ref_wav, wav_path, crop_wav_dir, video_fps, verb
         w = (w / np.std(w)) * np.std(r)
         if verbose:
             print('*** np.std(w), np.std(r): ', np.std(w), np.std(r))
-        temp_wav = f'{crop_wav_dir}/{wav_path}.{random.randint(0, 10000)}.wav'
+        temp_wav = f'{crop_wav_dir}/{Path(wav_path).stem}.{random.randint(0, 10000)}.wav'
         soundfile.write(temp_wav, w, 22050)
         wav_path = temp_wav 
         
@@ -232,6 +232,16 @@ def compose(template, model_outs, video_start_offset_frame, verbose=False):
     return composed
 
 
+# 음성과 video sync 를 위해 적당히 정해진 crop_start_frame 만큼 잘라낸다.
+def crop_start_frame(images, crop_cnt):
+    if crop_cnt >= 0:
+        images2 = images[crop_cnt:] + ([images[-1]]*crop_cnt)
+    else:
+        images2 = ([images[0]]*abs(crop_cnt)) + images[:crop_cnt]
+    assert(len(images) == len(images2))
+    return images2
+    
+
 # 비디오 쓰기(composed 이미지들을 하나의 video 로 만든다.)
 def write_video(composed, wav_path, fps, output_path, slow_write, verbose=False):
     duration = len(composed)/fps
@@ -266,7 +276,7 @@ def write_video(composed, wav_path, fps, output_path, slow_write, verbose=False)
 
 # model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
 def gen_video(template, wav_path, wav_std, wav_std_ref_wav,
-              video_start_offset_frame, out_path, slow_write=True, verbose=False):
+              video_start_offset_frame, out_path, head_only=False, slow_write=True, verbose=False):
         
     device = template.model.device
     fps = template.fps
@@ -282,8 +292,11 @@ def gen_video(template, wav_path, wav_std, wav_std_ref_wav,
     # model inference
     outs = inference_model(template, val_images, device, verbose=verbose)
 
-    # template video 와 model inference 결과 합성
-    composed = compose(template, outs, video_start_offset_frame, verbose=verbose)
+    if head_only:
+        composed = crop_start_frame(outs, template.model.args.crop_start_frame)
+    else:
+        # template video 와 model inference 결과 합성
+        composed = compose(template, outs, video_start_offset_frame, verbose=verbose)
     
     # 비디오 생성
     write_video(composed, wav_path, fps, out_path, slow_write, verbose=verbose)
