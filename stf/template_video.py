@@ -83,6 +83,7 @@ class TemplateVideo():
                          wav_std_ref_wav=wav_std_ref_wav,
                          video_start_offset_frame=video_start_offset_frame,
                          out_path=out_path,
+                         full_imgs=self.full_frames,
                          head_only=head_only,
                          slow_write=slow_write,
                          verbose=self.verbose)

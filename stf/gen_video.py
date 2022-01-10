@@ -170,7 +170,7 @@ def inference_model(template, val_images, device, verbose=False):
 
 
 # template video 의 frame 과 model inference 결과를 합성한다.
-def compose(template, model_outs, video_start_offset_frame, verbose=False):
+def compose(template, model_outs, video_start_offset_frame, full_imgs, verbose=False):
     imgs = model_outs
     args = template.model.args
     VSO = video_start_offset_frame
@@ -209,7 +209,7 @@ def compose(template, model_outs, video_start_offset_frame, verbose=False):
     mask_crop = mask
     mask_origin = (mask - 1) * -1    
     
-    full_imgs = template.full_frames[VSO+first_frame_idx : VSO + len(imgs)+first_frame_idx]
+    #full_imgs = template.full_frames[VSO+first_frame_idx : VSO + len(imgs)+first_frame_idx]
     
     # 음성과 video sync 를 위해 적당히 정해진 crop_start_frame 만큼 잘라낸다.
     crop_start_frame = template.model.args.crop_start_frame
@@ -276,7 +276,8 @@ def write_video(composed, wav_path, fps, output_path, slow_write, verbose=False)
 
 # model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
 def gen_video(template, wav_path, wav_std, wav_std_ref_wav,
-              video_start_offset_frame, out_path, head_only=False, slow_write=True, verbose=False):
+              video_start_offset_frame, out_path, full_imgs,
+              head_only=False, slow_write=True, verbose=False):
         
     device = template.model.device
     fps = template.fps
@@ -296,7 +297,7 @@ def gen_video(template, wav_path, wav_std, wav_std_ref_wav,
         composed = crop_start_frame(outs, template.model.args.crop_start_frame)
     else:
         # template video 와 model inference 결과 합성
-        composed = compose(template, outs, video_start_offset_frame, verbose=verbose)
+        composed = compose(template, outs, video_start_offset_frame, full_imgs, verbose=verbose)
     
     # 비디오 생성
     write_video(composed, wav_path, fps, out_path, slow_write, verbose=verbose)
