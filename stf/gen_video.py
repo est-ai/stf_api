@@ -521,8 +521,11 @@ def write_video3(out_path, compose_func, model_out, template_video_path,
     assert(crop_start_frame_count >= 0)
     
     # crop_start_frame_count 만큼 앞에서 버린다.
-    for _ in zip(reader, range(crop_start_frame_count)):
-        pass
+    if crop_start_frame_count > 0:
+        # TODO snow : 왜인지 모르겠지만, crop_start_frame_count-1 로 해야지만 프레임이 맞는다.
+        for f, i in zip(reader, range(crop_start_frame_count-1)):
+            #print('crop:', i)
+            pass
     
     writer = imageio_ffmpeg.write_frames(out_path,
                                          size = size,
