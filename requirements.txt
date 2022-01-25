@@ -17,7 +17,7 @@ moviepy
 addict
 seaborn
 imageio
-imageio-ffmpeg
+imageio-ffmpeg==0.4.5
 ipykernel
 ipywidgets
-
+memory_profiler

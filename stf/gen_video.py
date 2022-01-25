@@ -22,6 +22,8 @@ from .s2f_dir.src.datagen_aug import LipGanDS
 from .preprocess_dir.utils import face_finder as ff
 from .preprocess_dir.utils import crop_with_fan as cwf 
 from .preprocess_dir.utils import make_mels as mm 
+import imageio_ffmpeg 
+from joblib import Parallel, delayed
 
 
 # model inference 를 위해 audio 파일을 준비시킨다. (wav 길이만큼 dummy 이미지 생성, mel 생성)
@@ -92,7 +94,7 @@ def dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav, fps, video_
         raise Exception(f'template video have some error:{template_video_path}, first_frame_idx:{first_frame_idx}')
     
     # audio 가 template video 보다 너무 길면 에러를 낸다.
-    if len(images) < len(audios) and (VSO is not None and len(images) < len(audio) + VSO):
+    if len(images) < len(audios) and (VSO is not None and len(images) < len(audios) + VSO):
         raise Exception('wav is too long than template video')
     
     # template video, audio 중 더 짧은쪽에 맞춰 생성한다.
@@ -170,7 +172,7 @@ def inference_model(template, val_images, device, verbose=False):
 
 
 # template video 의 frame 과 model inference 결과를 합성한다.
-def compose(template, model_outs, video_start_offset_frame, full_imgs, verbose=False):
+def compose(template, model_outs, video_start_offset_frame, full_imgs, n_compose_worker_num=5, verbose=False):
     imgs = model_outs
     args = template.model.args
     VSO = video_start_offset_frame
@@ -190,6 +192,7 @@ def compose(template, model_outs, video_start_offset_frame, full_imgs, verbose=F
     # resize
     inter_alg = cv2.INTER_AREA if x2-x1+1 < img_size else cv2.INTER_CUBIC 
     if verbose:
+        print('n_compose_worker_num:', n_compose_worker_num)
         print('resize:', 'INTER_AREA' if inter_alg == cv2.INTER_AREA else 'INTER_CUBIC')
     imgs = [cv2.resize(c, (x2-x1+1, y2-y1+1), inter_alg) for c in tqdm(imgs, desc='resize to original crop', disable=not verbose)]
     
@@ -225,10 +228,22 @@ def compose(template, model_outs, video_start_offset_frame, full_imgs, verbose=F
     sz_x = x2-x1+1
     sz_y = y2-y1+1
         
-    composed = []
-    for c, f in tqdm(zip(imgs, full_imgs2), total=len(imgs), desc='compose original frames and model outputs', disable=not verbose):
-        composed.append(f.copy())
-        composed[-1][y1:y2+1, x1:x2+1] = (f[y1:y2+1, x1:x2+1] * mask_origin + c[0:sz_y, 0:sz_x] * mask_crop)# [:,:-2,:]
+    #composed = []
+    #for c, f in tqdm(zip(imgs, full_imgs2), total=len(imgs), desc='compose original frames and model outputs', disable=not verbose):
+    #    composed.append(f.copy())
+    #    composed[-1][y1:y2+1, x1:x2+1] = (f[y1:y2+1, x1:x2+1] * mask_origin + c[0:sz_y, 0:sz_x] * mask_crop)# [:,:-2,:]
+    
+    def compose_func(v):
+        c, f = v
+        frame = f.copy()
+        frame[y1:y2+1, x1:x2+1] = (f[y1:y2+1, x1:x2+1] * mask_origin + c[0:sz_y, 0:sz_x] * mask_crop)# [:,:-2,:]
+        return frame
+    composed = Parallel(n_jobs=n_compose_worker_num)(
+        delayed(compose_func)((c, f))
+        for c, f in tqdm(zip(imgs, full_imgs2), total=len(imgs),
+                         desc='compose original frames and model outputs',
+                         disable=not verbose)
+    )
     return composed
 
 
@@ -277,6 +292,7 @@ def write_video(composed, wav_path, fps, output_path, slow_write, verbose=False)
 # model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
 def gen_video(template, wav_path, wav_std, wav_std_ref_wav,
               video_start_offset_frame, out_path, full_imgs,
+              n_compose_worker_num=5,
               head_only=False, slow_write=True, verbose=False):
         
     device = template.model.device
@@ -297,7 +313,9 @@ def gen_video(template, wav_path, wav_std, wav_std_ref_wav,
         composed = crop_start_frame(outs, template.model.args.crop_start_frame)
     else:
         # template video 와 model inference 결과 합성
-        composed = compose(template, outs, video_start_offset_frame, full_imgs, verbose=verbose)
+        composed = compose(template, outs, video_start_offset_frame, full_imgs,
+                           n_compose_worker_num=n_compose_worker_num,
+                           verbose=verbose)
     
     # 비디오 생성
     write_video(composed, wav_path, fps, out_path, slow_write, verbose=verbose)
@@ -309,3 +327,134 @@ def gen_video(template, wav_path, wav_std, wav_std_ref_wav,
     
     return out_path
     
+
+# model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
+def gen_video2(template, wav_path, wav_std, wav_std_ref_wav,
+               video_start_offset_frame, out_path, full_imgs,
+               n_compose_worker_num=5,
+               head_only=False, slow_write=True, verbose=False):
+        
+    device = template.model.device
+    fps = template.fps
+    
+    # model inference 를 위한 데이터 준비
+    val_images = dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav,
+                                    fps=fps,
+                                    video_start_offset_frame=video_start_offset_frame,
+                                    verbose=verbose)
+    if verbose:
+        print('len(val_images) : ', len(val_images))
+
+    # model inference
+    outs = inference_model(template, val_images, device, verbose=verbose)
+    
+    # crop_start_frame 만큼 잘라낸다.
+    outs = crop_start_frame(outs, template.model.args.crop_start_frame)
+    full_imgs = crop_start_frame(full_imgs, template.model.args.crop_start_frame)
+        
+    # 함성함수를 얻는다.
+    compose_func = get_compose_func(template, verbose=verbose)
+    write_video2(out_path=out_path,
+                 compose_func=compose_func, 
+                 model_out=outs,
+                 full_frames=full_imgs,
+                 wav_path=wav_path,
+                 fps=fps,
+                 output_path=out_path, 
+                 slow_write=slow_write,
+                 n_compose_worker_num=n_compose_worker_num,
+                 verbose=verbose)
+    del outs
+    del val_images
+    gc.collect()
+    
+    return out_path
+
+
+def write_video2(out_path, compose_func, model_out, full_frames,
+                 wav_path, fps, output_path, slow_write,
+                 n_compose_worker_num=5,
+                 verbose=False):
+    if verbose:
+        print('[5/5] 비디오 합성 함수... ')
+        print(f"save video {out_path}")
+    
+    # 합성하면서 비디오 생성
+    ffmpeg_params = None
+    if slow_write:
+        ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+
+    # document : https://github.com/imageio/imageio-ffmpeg
+    size = full_frames[0].shape[:2][::-1]
+    writer = imageio_ffmpeg.write_frames(out_path,
+                                         size = size,
+                                         fps=fps,
+                                         ffmpeg_log_level='debug',
+                                         quality = 10, # 0~10
+                                         output_params=ffmpeg_params,
+                                         audio_path = wav_path, )
+    
+    writer.send(None)  # seed the generator
+    out_memory_shape = full_frames[0].shape
+    for o, f in tqdm(zip(model_out, full_frames), total=len(model_out), desc="compose (model out, template)", disable=not verbose):
+        frame = compose_func(o, f)
+        writer.send(frame)  # seed the generator
+    writer.close()
+    
+    
+    #composed = Parallel(n_jobs=n_compose_worker_num)(
+    #    delayed(compose_func)((c, f))
+    #    for c, f in tqdm(zip(imgs, full_imgs2), total=len(imgs),
+    #                     desc='compose original frames and model outputs',
+    #                     disable=not verbose)
+    #)
+    
+    
+# template video 의 frame 과 model inference 결과를 합성한다.
+def get_compose_func(template, verbose=False):
+    args = template.model.args
+    
+    df = pd.read_pickle(f'{template.crop_mp4_dir}/{Path(template.template_video_path).stem}_000/df_fan.pickle')
+    #sz = df['cropped_size'].values[0]
+    x1, y1, x2, y2 = df['cropped_box'].values[0].round().astype(np.int)
+    del df
+    
+    img_size = args.img_size
+    if verbose:
+        print('croped size: ', x2-x1+1, y2-y1+1)
+        print('croped region(x1,y1,x2,y2): ', x1, y1, x2, y2)
+        
+    def get_mask(width, height, gradation_width=50):
+        mask = np.ones((height, width, 1))
+        r = list(range(0,gradation_width,1))
+        for s, e in zip(r, r[1:]):
+            g = s / gradation_width
+            #print(f'---- s:{s}, e:{e}, g:{g}')
+            mask[s:e,               s:width-s,       :] = g
+            mask[height-e:height-s, s:width-s,       :] = g
+            mask[s:height-s,        s:e,             :] = g
+            mask[s:height-s,        width-e:width-s, :] = g
+        return mask
+    
+    mask = get_mask(x2-x1+1,y2-y1+1,30)
+    mask_crop = mask
+    mask_origin = (mask - 1) * -1    
+    
+    sz_x = x2-x1+1
+    sz_y = y2-y1+1
+        
+    # resize algorithm
+    inter_alg = cv2.INTER_AREA if x2-x1+1 < img_size else cv2.INTER_CUBIC 
+    
+    def compose_one(model_out, full_img):
+        # 1. resize
+        img = cv2.resize(model_out, (x2-x1+1, y2-y1+1), inter_alg)
+        # 2. 붙여넣기
+        c, f = img, full_img
+        out_memory = full_img.copy()
+        out_memory[y1:y2+1, x1:x2+1] = (f[y1:y2+1, x1:x2+1] * mask_origin + c[0:sz_y, 0:sz_x] * mask_crop)# [:,:-2,:]
+        return out_memory
+    
+    return compose_one
+
+
