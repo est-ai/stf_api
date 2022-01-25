@@ -436,7 +436,7 @@ def get_compose_func(template, verbose=False):
             mask[s:height-s,        width-e:width-s, :] = g
         return mask
     
-    mask = get_mask(x2-x1+1,y2-y1+1,30)
+    mask = get_mask(x2-x1+1,y2-y1+1,int((x2-x1)*0.1))
     mask_crop = mask
     mask_origin = (mask - 1) * -1    
     
@@ -527,7 +527,7 @@ def write_video3(out_path, compose_func, model_out, template_video_path,
     writer = imageio_ffmpeg.write_frames(out_path,
                                          size = size,
                                          fps=fps,
-                                         ffmpeg_log_level='debug',
+                                         ffmpeg_log_level='error',
                                          quality = 10, # 0~10
                                          output_params=ffmpeg_params,
                                          audio_path = wav_path, )
