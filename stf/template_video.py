@@ -126,7 +126,7 @@ class TemplateVideo():
     gen_video3
 
         
-def template_video(model, template_video_path, callback, read_full_frame=True, verbose=False):
+def template_video(model, template_video_path, callback, read_full_frame=False, verbose=False):
     if verbose:
         print('load template video : ', template_video_path)
         
