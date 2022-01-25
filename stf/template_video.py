@@ -5,7 +5,7 @@ import imageio
 import sys
 import gc
 from .util import *
-from .gen_video import gen_video, gen_video2
+from .gen_video import gen_video, gen_video2, gen_video3
 
     
 # template video 전처리
@@ -77,6 +77,9 @@ class TemplateVideo():
     def gen(self, wav_path, wav_std, wav_std_ref_wav, video_start_offset_frame, head_only=False, slow_write=True, out_path=None):
         if out_path is None:
             out_path = 'temp.mp4'
+        if self.full_frames is None:
+            print('full_frames is not loaded use gen3 function')
+            return self.gen3(wav_path, wav_std, wav_std_ref_wav, video_start_offset_frame, head_only, slow_write, out_path)
         return gen_video(self,
                          wav_path=wav_path,
                          wav_std=wav_std,
@@ -92,6 +95,10 @@ class TemplateVideo():
     def gen2(self, wav_path, wav_std, wav_std_ref_wav, video_start_offset_frame, head_only=False, slow_write=True, out_path=None):
         if out_path is None:
             out_path = 'temp.mp4'
+        if self.full_frames is None:
+            print('full_frames is not loaded use gen3 function')
+            return self.gen3(wav_path, wav_std, wav_std_ref_wav, video_start_offset_frame, head_only, slow_write, out_path)
+            
         return gen_video2(self,
                          wav_path=wav_path,
                          wav_std=wav_std,
@@ -102,12 +109,30 @@ class TemplateVideo():
                          head_only=head_only,
                          slow_write=slow_write,
                          verbose=self.verbose)
+        
+
+    def gen3(self, wav_path, wav_std, wav_std_ref_wav, video_start_offset_frame, head_only=False, slow_write=True, out_path=None):
+        if out_path is None:
+            out_path = 'temp.mp4'
+        return gen_video3(self,
+                         wav_path=wav_path,
+                         wav_std=wav_std,
+                         wav_std_ref_wav=wav_std_ref_wav,
+                         video_start_offset_frame=video_start_offset_frame,
+                         out_path=out_path,
+                         head_only=head_only,
+                         slow_write=slow_write,
+                         verbose=self.verbose)
+    gen_video3
 
         
-def template_video(model, template_video_path, callback, verbose=False):
+def template_video(model, template_video_path, callback, read_full_frame=True, verbose=False):
     if verbose:
         print('load template video : ', template_video_path)
-    frames = imageio.mimread(template_video_path, 'ffmpeg', memtest=False)
+        
+    frames = None
+    if read_full_frame:
+        frames = imageio.mimread(template_video_path, 'ffmpeg', memtest=False)
     template_video = TemplateVideo(model, template_video_path, frames, verbose=verbose)
     if verbose:
         print('complete loading template video : ', template_video_path)

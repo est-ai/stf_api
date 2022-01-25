@@ -458,3 +458,92 @@ def get_compose_func(template, verbose=False):
     return compose_one
 
 
+# model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
+def gen_video3(template, wav_path, wav_std, wav_std_ref_wav,
+               video_start_offset_frame, out_path,
+               head_only=False, slow_write=True, verbose=False):
+        
+    device = template.model.device
+    fps = template.fps
+    
+    # model inference 를 위한 데이터 준비
+    val_images = dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav,
+                                    fps=fps,
+                                    video_start_offset_frame=video_start_offset_frame,
+                                    verbose=verbose)
+    if verbose:
+        print('len(val_images) : ', len(val_images))
+
+    # model inference
+    outs = inference_model(template, val_images, device, verbose=verbose)
+    
+    # crop_start_frame 만큼 잘라낸다.
+    outs = crop_start_frame(outs, template.model.args.crop_start_frame)
+
+    # 함성함수를 얻는다.
+    compose_func = get_compose_func(template, verbose=verbose)
+    write_video3(out_path=out_path,
+                 compose_func=compose_func, 
+                 model_out=outs,
+                 template_video_path=template.template_video_path,
+                 wav_path=wav_path,
+                 fps=fps,
+                 crop_start_frame_count=template.model.args.crop_start_frame,
+                 output_path=out_path, 
+                 slow_write=slow_write,
+                 verbose=verbose)
+    del outs
+    del val_images
+    gc.collect()
+    
+    return out_path
+
+
+def write_video3(out_path, compose_func, model_out, template_video_path,
+                 wav_path, fps, crop_start_frame_count,
+                 output_path, slow_write,
+                 verbose=False):
+    if verbose:
+        print('[5/5] 비디오 합성 함수... ')
+        print(f"save video {out_path}")
+    
+    # 합성하면서 비디오 생성
+    ffmpeg_params = None
+    if slow_write:
+        ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+
+    # document : https://github.com/imageio/imageio-ffmpeg
+    reader = imageio_ffmpeg.read_frames(template_video_path)
+    meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+    size = meta["size"]
+    if verbose:
+        print(meta)
+    assert(crop_start_frame_count >= 0)
+    
+    # crop_start_frame_count 만큼 앞에서 버린다.
+    for _ in zip(reader, range(crop_start_frame_count)):
+        pass
+    
+    writer = imageio_ffmpeg.write_frames(out_path,
+                                         size = size,
+                                         fps=fps,
+                                         ffmpeg_log_level='debug',
+                                         quality = 10, # 0~10
+                                         output_params=ffmpeg_params,
+                                         audio_path = wav_path, )
+    
+    writer.send(None)  # seed the generator
+    try:
+        for o, f in tqdm(zip(model_out, reader), total=len(model_out), desc="compose (model out, template)", disable=not verbose):
+            f = np.frombuffer(f, dtype=np.uint8)
+            #print(f.shape, size, f.dtype)
+            f = f.reshape(size[1], size[0], 3)
+            frame = compose_func(o, f)
+            writer.send(frame)  # seed the generator
+    except Exception as e:
+        print('exception read template video stream', e)
+        raise Exception('except than template video', e)
+        pass
+        
+    writer.close()
+    
