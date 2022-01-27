@@ -9,7 +9,7 @@ from .gen_video import gen_video, gen_video2, gen_video3
 
     
 # template video 전처리
-def preprocess_template(config_path, template_video_path, reference_face, work_root_path, call_back, device, verbose=False):  
+def preprocess_template_old(config_path, template_video_path, reference_face, work_root_path, call_back, device, verbose=False):  
     ff.init_face_finder(device)
     cwf.init_fan(device)
     config = read_config(config_path)
@@ -55,14 +55,14 @@ def preprocess_template(config_path, template_video_path, reference_face, work_r
 
 
 # template video 전처리
-# preprocess_template 와 기능은 동일하고, 메모리 사용량 줄임
-def preprocess_template2(config_path,
-                         template_video_path,
-                         reference_face,
-                         work_root_path,
-                         call_back,
-                         device,
-                         verbose=False):  
+# preprocess_template_old(기존함수) 와 기능은 동일하고, 메모리 사용량 줄임
+def preprocess_template(config_path,
+                        template_video_path,
+                        reference_face,
+                        work_root_path,
+                        call_back,
+                        device,
+                        verbose=False):  
     ff.init_face_finder(device)
     cwf.init_fan(device)
     config = read_config(config_path)
