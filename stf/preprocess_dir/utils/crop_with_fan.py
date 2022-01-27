@@ -13,6 +13,7 @@ from moviepy.editor import AudioFileClip, ImageSequenceClip
 
 from . import face_finder as ff
 import face_alignment
+import imageio_ffmpeg
 
 
 g_detector_fan = None
@@ -272,3 +273,136 @@ def save_debug_clip(clip, fps):
     save_path = f'{clip}/debug.mp4'
     clip_debug.write_videofile(save_path, logger=None)
     return save_path 
+
+
+def crop_and_save(path, df_fan, offset_y, margin, clip_dir):
+    df_fan = df_fan.copy()
+    
+    #ToDo: None을 제거해야 됨. crash 발생
+    pts2ds = [e for e in df_fan['pts2d'].values if e is not None]
+    if len(pts2ds):
+        pts2ds = np.stack(pts2ds)
+        x1, y1 = pts2ds[:,:,0].min(), pts2ds[:,:,1].min()
+        x2, y2 = pts2ds[:,:,0].max(), pts2ds[:,:,1].max()
+    else:
+        return None, None
+    
+    cx, cy = (x1+x2)/2, (y1+y2)/2
+    sx, sy = (x2-x1+1)*(1+margin), (y2-y1+1)*(1+margin)
+    x1, y1 = cx-sx/2, cy-sy/2
+    x2, y2 = cx+sx/2, cy+sy/2
+    
+    
+    size = (x2-x1+1)
+    offset_y = int(round(size*offset_y))
+    y1 = y1 + offset_y
+    y2 = y1 + size
+    x1, y1, x2, y2 = np.array([x1, y1, x2, y2]).round().astype(np.int)
+    
+    #print((x1, y1, x2, y2), ((x2-x1+1), (y2-y1+1)))
+    reader = imageio_ffmpeg.read_frames(str(path))
+    meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+    frame_size = meta['size']
+    
+    cropped_pts2ds = []
+    for (_, pts2d, _,  frame_idx), f in tqdm(zip(df_fan.values, reader), total=len(df_fan), desc='crop_and_save'):
+        f = np.frombuffer(f, dtype=np.uint8)
+        f = f.reshape(frame_size[1], frame_size[0], 3)
+        if pts2d is not None:
+            cropped_pts2ds.append(pts2d - (x1, y1))
+        else:
+            cropped_pts2ds.append(None)
+        cropped_frame = f[y1:y2+1, x1:x2+1].copy()
+        
+        name = f"""{frame_idx:05d}_{'yes' if pts2d is not None else 'no'}.jpg"""
+        cv2.imwrite(str(Path(clip_dir)/str(name)), cropped_frame[:,:,[2,1,0]], [int(cv2.IMWRITE_JPEG_QUALITY), 100])
+        
+    df_fan['cropped_pts2d'] = cropped_pts2ds 
+    df_fan['cropped_box'] = [np.array([x1, y1, x2, y2])]*len(df_fan)
+    df_fan['cropped_size'] = size
+    return df_fan
+    
+    
+# df_fan_info 와 기능은 동일하고, 메모리 사용량만 줄임
+def df_fan_info2(path, box, verbose=False):
+    x1, y1, x2, y2 = box
+    
+    def fan_info(f):
+        face = f[y1:y2+2, x1:x2+1]
+        pts2d, box = face_detect_fan(face)
+        #pts3d, _   = face_detect_fan(face, type3d=True)
+        pts3d = None
+        return box, pts2d, pts3d
+    
+    def to_full(box, pts2d, pts3d, x1y1):
+        if box is not None:
+            box   = (box.reshape(-1,2) + x1y1).reshape(-1)
+        if pts2d is not None:
+            pts2d = pts2d + x1y1
+        if pts3d is not None:
+            pts3d = pts3d + (x1y1 +(0,))
+        return box, pts2d, pts3d
+    
+    def __fan_info(f, size):
+        f = np.frombuffer(f, dtype=np.uint8)
+        f = f.reshape(size[1], size[0], 3)
+        return fan_info(f)
+    
+    reader = imageio_ffmpeg.read_frames(str(path))
+    meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+    size = meta["size"]
+    
+    frame_cnt, _ = imageio_ffmpeg.count_frames_and_secs(str(path))
+    fi = {idx:__fan_info(frame, size)
+          for idx, frame in tqdm(enumerate(reader), total=frame_cnt, desc='■ fan ', disable=not verbose)}
+    fi = {idx: to_full(*info, (x1, y1)) for idx, info in fi.items()}
+    
+    df = pd.DataFrame(fi.values(), columns=['box', 'pts2d', 'pts3d'])
+    df['frame_idx'] = list(fi.keys())
+    return df
+    
+
+
+# save_crop_info 와 기능은 동일하고, 메모리 사용량을 줄인 것
+def save_crop_info2(anchor_box_path, mp4_path, out_dir, make_mp4=False, 
+                    crop_offset_y = -0.1, crop_margin=0.4, verbose=False):
+    df_anchor_i = pd.read_pickle(anchor_box_path)
+    
+    # 얼굴이 모두 들어가는 박스 크기를 구한다.
+    # 여기서 구한 박스에서만 fan 이 얼굴과 피처 포인트를 구한다.
+    box = get_anchor_box(df_anchor_i, offset_y=0, margin=1.0)
+    
+    min_idx, max_idx = df_anchor_i['frame_idx'].values[[0, -1]]
+    
+    clip_dir = Path(out_dir)/Path(anchor_box_path).stem
+    Path(clip_dir).mkdir(exist_ok=True, parents=True)
+    
+    try:
+        save_audio(mp4_path, f'{clip_dir}/audio.wav')
+        save_debug_audio(mp4_path, min_idx, max_idx, f'{clip_dir}/audio_debug.wav')
+    except:
+        # inference 때는 음성 없는 비디오가 들어온다.
+        pass
+    
+    pickle_path = f'{clip_dir}/df_fan.pickle'
+    if Path(pickle_path).exists():
+        return pickle_path
+    
+    # FAN 이 얼굴과 피처 포인트를 구한다.
+    df = df_fan_info2(mp4_path, box, verbose=verbose)
+    
+    # 모델에 입력할 박스를 다시 구해서 crop 한다.
+    # crop 박스 영역은 피쳐 포인트 기반으로 구한다.
+    df = crop_and_save(mp4_path, df,  offset_y=crop_offset_y,  margin=crop_margin, clip_dir=clip_dir)
+    if df is None:
+        return None
+    df.to_pickle(pickle_path)
+    with open(pickle_path.replace('.pickle', '.txt'), 'w') as f:
+        f.write('success')
+    
+    if make_mp4:
+        meta = ff.video_meta(mp4_path)
+        debug_clip_path = save_debug_clip(clip_dir, meta['fps'])
+        print('saved debug_mp4:', debug_clip_path )
+        
+    return pickle_path

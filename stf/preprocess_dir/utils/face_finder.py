@@ -11,6 +11,7 @@ from facenet_pytorch import MTCNN, InceptionResnetV1
 from moviepy.editor import AudioFileClip, ImageSequenceClip
 import cv2
 import gc
+import imageio_ffmpeg
 
 
 g_mtcnn = None
@@ -132,7 +133,6 @@ def calc_ebds_from_images(frames, verbose=False):
     for idx, fi in face_infos.items():
         fi['frame_idx'] = idx 
     return pd.concat(face_infos, ignore_index=True)
-
 # 유사도 구하는 유틸
 
 # 얼굴 박스 그려서 보여주기.  다른 사람 얼굴은 붉은색,  아나운서 얼굴은 녹색
@@ -179,6 +179,7 @@ def get_face_info_(frames, ebd_아나운서, sim_th, verbose=False):
 def get_face_info(path, ebd_아나운서, start=0, end=-1, stride=1, sim_th=0.7, verbose=False):
     frames = extract_frame(path, start, end, stride, verbose=verbose)
     return get_face_info_(frames, ebd_아나운서,  sim_th, verbose=verbose)
+
 
 def get_face_idxs(mp4_path, meta):
     STEP_SECONDS = 1
@@ -307,8 +308,8 @@ def save_face_info2(mp4_path, ebd_아나운서, base='./', verbose=False):
         df_face_info.to_pickle(dst)
         return [dst]
     return [dst]
-    
-    
+
+
 # 메타데이터 추출 유틸
 def video_meta(file):
     vid = imageio.get_reader(file, 'ffmpeg')
@@ -317,3 +318,73 @@ def video_meta(file):
     meta['nframes'] = vid.count_frames()
     vid.close()
     return meta
+
+
+# 비디오에 나오는 얼굴 임베딩값 구하는 유틸
+def calc_ebds_from_images2(path, stride, verbose=False):
+    print('calc_ebds_from_images2, ', path)
+    def __find_face(f, size):
+        f = np.frombuffer(f, dtype=np.uint8)
+        f = f.reshape(size[1], size[0], 3)
+        return find_face(f)[0]
+    
+    reader = imageio_ffmpeg.read_frames(path)
+    meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+    size = meta["size"]
+    
+    frame_cnt, _ = imageio_ffmpeg.count_frames_and_secs(path)
+    face_infos = {}
+    for idx, frame in tqdm(enumerate(reader), total=frame_cnt, desc='find_faces for calc_ebd', disable=not verbose):
+        if idx % stride != 0:
+            continue
+        face_infos[idx] = __find_face(frame, size)
+        
+    for idx, fi in face_infos.items():
+        fi['frame_idx'] = idx 
+    return pd.concat(face_infos, ignore_index=True)
+
+
+# get_face_info 와 기능은 동일하지만, 메모리 사용을 줄인 버전
+def get_face_info2(path, ebd_아나운서, stride=1, sim_th=0.7, verbose=False):
+    print('get_face_info2')
+    df_face_info = calc_ebds_from_images2(path, stride=stride, verbose=verbose)
+    df_face_info = df_face_info.dropna(axis=0)
+
+    calc_sim = lambda ebd: (ebd_아나운서 * ebd).sum().item()
+    df_face_info['similaraty'] = df_face_info['ebd'].map(calc_sim)
+    df_face_info = df_face_info.sort_values(['frame_idx', 'similaraty'])
+    
+    # 유사도 기반으로 아나운서 얼굴만 필터(실제로는 먼저 가장 유사한 얼굴만 골라내기)
+    return df_face_info, get_filtered_face(df_face_info, sim_th)
+
+
+# save_face_info2 와 기능은 동일하나,
+# 메모리 적게 사용하도록 개선한 버전
+def save_face_info3(mp4_path, ebd_아나운서, base='./', verbose=False):
+    df_face_info_path = os.path.join(base,'df_face_info', f"{str(Path(mp4_path).stem)}.pickle")
+    if verbose:
+        print('save_face_info3 - df_face_info: ', str(df_face_info_path))
+    
+    if not Path(df_face_info_path).exists():
+        fps = video_meta(mp4_path)['fps']
+        r = get_face_info2(mp4_path, ebd_아나운서, stride=round(fps)*1, verbose=verbose)
+        df_face_info, df_아나운서_only  = r
+        os.makedirs(os.path.dirname(df_face_info_path), exist_ok=True)
+        df_face_info.to_pickle(df_face_info_path)
+        
+    dst = Path(base) / 'df_anchor_i' / f"{Path(df_face_info_path).stem}_000.pickle"
+    if verbose:
+        print('df_anchor_i:', str(dst))
+    if not Path(dst).exists():      
+        val_end = get_valid_end(mp4_path, end=None, stride=1)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        df = pd.read_pickle(df_face_info_path)
+        df_ = df.sort_values('similaraty', ascending=False).drop_duplicates(['frame_idx'])
+        df_ = df_.query('similaraty >= 0.3')
+        #display(df_.groupby('frame_idx').count())
+        #pdb.set_trace()
+        df_face_info = face_info_to_anchor(df_, val_end)
+        df_face_info.to_pickle(dst)
+        return [dst]
+    return [dst]
+
