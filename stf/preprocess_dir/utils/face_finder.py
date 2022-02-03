@@ -270,7 +270,9 @@ def face_info_to_anchor(df, val_end=None):
     rows = []
     for idx in range(val_end+1):
         target_idx = idx//30 *30
-        box, _, _, sim = df.query('frame_idx == @target_idx').iloc[0].values
+        df_search = df.query('frame_idx == @target_idx')
+        assert(len(df_search) > 0)
+        box, _, _, sim = df_search.iloc[0].values
         x1, y1, x2, y2 = box
         rows.append([box, idx, sim, (x2-x1)*(y2-y1)])
     
@@ -297,14 +299,13 @@ def save_face_info2(mp4_path, ebd_아나운서, base='./', verbose=False):
     if verbose:
         print('df_anchor_i:', str(dst))
     if not Path(dst).exists():      
-        val_end = get_valid_end(mp4_path, end=None, stride=1)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         df = pd.read_pickle(df_face_info_path)
         df_ = df.sort_values('similaraty', ascending=False).drop_duplicates(['frame_idx'])
         df_ = df_.query('similaraty >= 0.3')
         #display(df_.groupby('frame_idx').count())
         #pdb.set_trace()
-        df_face_info = face_info_to_anchor(df_, val_end)
+        df_face_info = face_info_to_anchor(df_, val_end=None)
         df_face_info.to_pickle(dst)
         return [dst]
     return [dst]
