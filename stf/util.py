@@ -1,6 +1,7 @@
 import json
 from addict import Dict
 from pathlib import Path
+import pdb
 
 
 def read_config(config_path):
@@ -22,3 +23,57 @@ def get_crop_mp4_dir(preprocess_dir, video_path):
     return f'{preprocess_dir}/crop_video_{Path(video_path).stem}'
 
 
+class _CallBack(object):
+    def __init__(self, callback, min_per, max_per, desc, verbose=False):
+        self.callback = callback
+        self.min_per = min_per
+        self.max_per = max_per
+        if isinstance(callback, _CallBack):
+            self.desc = callback.desc + '/' + desc
+        else:
+            self.desc = desc
+        self.last_per = -1
+        self.verbose = verbose
+        self.callback_interval = 1
+        
+    def __call__(self, per):
+        if self.callback is None: return
+        my_per = self.min_per + (per+1) / 100.0 * (self.max_per - self.min_per)
+        my_per = int(my_per)
+        if my_per - self.last_per >= self.callback_interval and my_per % self.callback_interval == 0:
+            #if self.verbose:
+            #    print(self.desc, ' : ', my_per)
+            self.callback(my_per)
+            self.last_per = my_per
+        
+def callback_inter(callback, min_per=0, max_per=100, desc='', verbose=False):
+    assert(min_per >=0 and max_per >=0 and max_per > min_per)
+    return _CallBack(callback, min_per, max_per, desc, verbose=verbose)
+
+
+def callback_test():
+    def callback(per):
+        print('real callback', per)
+        
+    callback1 = callback_inter(callback, min_per=0, max_per=50, desc='1')
+    callback2 = callback_inter(callback, min_per=50, max_per=90, desc='2')
+    callback3 = callback_inter(callback, min_per=90, max_per=100, desc='3')
+    #for i in range(0,101,10):
+    #    callback1(i)
+        
+    callback11 = callback_inter(callback1, min_per=0, max_per=20, desc='a')
+    callback12 = callback_inter(callback1, min_per=20, max_per=80, desc='b')
+    callback13 = callback_inter(callback1, min_per=80, max_per=100, desc='c')
+    
+    for i in range(0,101,1):
+        callback11(i)
+    for i in range(0,101,1):
+        callback12(i)
+    for i in range(0,101,1):
+        callback13(i)
+        
+    for i in range(0,101,1):
+        callback2(i)
+    for i in range(0,101,1):
+        callback3(i)
+        

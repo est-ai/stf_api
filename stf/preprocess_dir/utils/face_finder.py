@@ -12,6 +12,7 @@ from moviepy.editor import AudioFileClip, ImageSequenceClip
 import cv2
 import gc
 import imageio_ffmpeg
+from stf.util import callback_inter
 
 
 g_mtcnn = None
@@ -321,8 +322,9 @@ def video_meta(file):
 
 
 # 비디오에 나오는 얼굴 임베딩값 구하는 유틸
-def calc_ebds_from_images2(path, stride, verbose=False):
-    print('calc_ebds_from_images2, ', path)
+def calc_ebds_from_images2(path, stride, callback=None, verbose=False):
+    if verbose:
+        print('calc_ebds_from_images2, ', path)
     def __find_face(f, size):
         f = np.frombuffer(f, dtype=np.uint8)
         f = f.reshape(size[1], size[0], 3)
@@ -335,6 +337,9 @@ def calc_ebds_from_images2(path, stride, verbose=False):
     frame_cnt, _ = imageio_ffmpeg.count_frames_and_secs(path)
     face_infos = {}
     for idx, frame in tqdm(enumerate(reader), total=frame_cnt, desc='find_faces for calc_ebd', disable=not verbose):
+        # 진행상황을 알려준다.
+        callback((idx+1)/frame_cnt*100)
+            
         if idx % stride != 0:
             continue
         face_infos[idx] = __find_face(frame, size)
@@ -345,9 +350,10 @@ def calc_ebds_from_images2(path, stride, verbose=False):
 
 
 # get_face_info 와 기능은 동일하지만, 메모리 사용을 줄인 버전
-def get_face_info2(path, ebd_아나운서, stride=1, sim_th=0.7, verbose=False):
-    print('get_face_info2')
-    df_face_info = calc_ebds_from_images2(path, stride=stride, verbose=verbose)
+def get_face_info2(path, ebd_아나운서, stride=1, sim_th=0.7, callback=None, verbose=False):
+    if verbose:
+        print('get_face_info2')
+    df_face_info = calc_ebds_from_images2(path, stride=stride, callback=callback, verbose=verbose)
     df_face_info = df_face_info.dropna(axis=0)
 
     calc_sim = lambda ebd: (ebd_아나운서 * ebd).sum().item()
@@ -360,14 +366,16 @@ def get_face_info2(path, ebd_아나운서, stride=1, sim_th=0.7, verbose=False):
 
 # save_face_info2 와 기능은 동일하나,
 # 메모리 적게 사용하도록 개선한 버전
-def save_face_info3(mp4_path, ebd_아나운서, base='./', verbose=False):
+def save_face_info3(mp4_path, ebd_아나운서, base='./', callback=None, verbose=False):
     df_face_info_path = os.path.join(base,'df_face_info', f"{str(Path(mp4_path).stem)}.pickle")
     if verbose:
         print('save_face_info3 - df_face_info: ', str(df_face_info_path))
+    callback1 = callback_inter(callback, min_per=0, max_per=90, desc='save_face_info3 - 1', verbose=verbose)
+    callback2 = callback_inter(callback, min_per=90, max_per=100, desc='save_face_info3 - 2', verbose=verbose)
     
     if not Path(df_face_info_path).exists():
         fps = video_meta(mp4_path)['fps']
-        r = get_face_info2(mp4_path, ebd_아나운서, stride=round(fps)*1, verbose=verbose)
+        r = get_face_info2(mp4_path, ebd_아나운서, stride=round(fps)*1, callback=callback1, verbose=verbose)
         df_face_info, df_아나운서_only  = r
         os.makedirs(os.path.dirname(df_face_info_path), exist_ok=True)
         df_face_info.to_pickle(df_face_info_path)
@@ -386,5 +394,6 @@ def save_face_info3(mp4_path, ebd_아나운서, base='./', verbose=False):
         df_face_info = face_info_to_anchor(df_, val_end)
         df_face_info.to_pickle(dst)
         return [dst]
+    callback2(100)
     return [dst]
 

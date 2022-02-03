@@ -122,7 +122,7 @@ def dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav, fps, video_
 
 
 # model inference 한다.
-def inference_model(template, val_images, device, verbose=False):
+def inference_model(template, val_images, device, callback=None, verbose=False):
     mask_ver = template.model.args.mask_ver
     #args = Dict(
     #    batch_size = 32,
@@ -152,13 +152,15 @@ def inference_model(template, val_images, device, verbose=False):
         img = np.clip(img, 0.0, 255.0).astype(np.uint8)
         return img
     
-    for img_gt, mel, ips in tqdm(dl, desc='inference model', disable=not verbose):
+        
+    for idx, (img_gt, mel, ips) in tqdm(enumerate(dl), desc='inference model', disable=not verbose):
         audio = mel.unsqueeze(1).to(device)
         ips = ips.to(device).permute(0, 3, 1, 2)
         with torch.no_grad():
             pred = template.model.model(ips, audio)
         gen_face = to_img(pred.permute(0, 2, 3, 1))
         outs += list(gen_face)
+        callback(idx/len(dl)*100)
         
     # BGR -> RBG
     imgs = [im[:,:,[2,1,0]] for im in outs]
@@ -461,10 +463,17 @@ def get_compose_func(template, verbose=False):
 # model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
 def gen_video3(template, wav_path, wav_std, wav_std_ref_wav,
                video_start_offset_frame, out_path,
-               head_only=False, slow_write=True, verbose=False):
-        
+               head_only=False,
+               slow_write=True,
+               callback=None,
+               verbose=False):
     device = template.model.device
     fps = template.fps
+        
+    callback1 = callback_inter(callback, min_per=0, max_per=30,
+                               desc='gen_video3 1', verbose=verbose)
+    callback2 = callback_inter(callback, min_per=30, max_per=100,
+                               desc='gen_video3 2', verbose=verbose)
     
     # model inference 를 위한 데이터 준비
     val_images = dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav,
@@ -475,7 +484,7 @@ def gen_video3(template, wav_path, wav_std, wav_std_ref_wav,
         print('len(val_images) : ', len(val_images))
 
     # model inference
-    outs = inference_model(template, val_images, device, verbose=verbose)
+    outs = inference_model(template, val_images, device, callback=callback1, verbose=verbose)
     
     # crop_start_frame 만큼 잘라낸다.
     outs = crop_start_frame(outs, template.model.args.crop_start_frame)
@@ -491,10 +500,12 @@ def gen_video3(template, wav_path, wav_std, wav_std_ref_wav,
                  crop_start_frame_count=template.model.args.crop_start_frame,
                  output_path=out_path, 
                  slow_write=slow_write,
+                 callback=callback2,
                  verbose=verbose)
     del outs
     del val_images
     gc.collect()
+    callback2(100)
     
     return out_path
 
@@ -502,6 +513,7 @@ def gen_video3(template, wav_path, wav_std, wav_std_ref_wav,
 def write_video3(out_path, compose_func, model_out, template_video_path,
                  wav_path, fps, crop_start_frame_count,
                  output_path, slow_write,
+                 callback=None,
                  verbose=False):
     if verbose:
         print('[5/5] 비디오 합성 함수... ')
@@ -537,12 +549,15 @@ def write_video3(out_path, compose_func, model_out, template_video_path,
     
     writer.send(None)  # seed the generator
     try:
-        for o, f in tqdm(zip(model_out, reader), total=len(model_out), desc="compose (model out, template)", disable=not verbose):
+        for idx, (o, f) in tqdm(enumerate(zip(model_out, reader)),
+                         total=len(model_out), desc="compose (model out, template)",
+                         disable=not verbose):
             f = np.frombuffer(f, dtype=np.uint8)
             #print(f.shape, size, f.dtype)
             f = f.reshape(size[1], size[0], 3)
             frame = compose_func(o, f)
             writer.send(frame)  # seed the generator
+            callback(idx/len(model_out)*100)
     except Exception as e:
         print('exception read template video stream', e)
         raise Exception('except than template video', e)

@@ -14,6 +14,7 @@ from moviepy.editor import AudioFileClip, ImageSequenceClip
 from . import face_finder as ff
 import face_alignment
 import imageio_ffmpeg
+from stf.util import callback_inter
 
 
 g_detector_fan = None
@@ -275,7 +276,7 @@ def save_debug_clip(clip, fps):
     return save_path 
 
 
-def crop_and_save(path, df_fan, offset_y, margin, clip_dir):
+def crop_and_save(path, df_fan, offset_y, margin, clip_dir, callback, verbose=False):
     df_fan = df_fan.copy()
     
     #ToDo: None을 제거해야 됨. crash 발생
@@ -305,7 +306,7 @@ def crop_and_save(path, df_fan, offset_y, margin, clip_dir):
     frame_size = meta['size']
     
     cropped_pts2ds = []
-    for (_, pts2d, _,  frame_idx), f in tqdm(zip(df_fan.values, reader), total=len(df_fan), desc='crop_and_save'):
+    for (_, pts2d, _,  frame_idx), f in tqdm(zip(df_fan.values, reader), total=len(df_fan), desc='crop_and_save', disable=not verbose):
         f = np.frombuffer(f, dtype=np.uint8)
         f = f.reshape(frame_size[1], frame_size[0], 3)
         if pts2d is not None:
@@ -316,6 +317,7 @@ def crop_and_save(path, df_fan, offset_y, margin, clip_dir):
         
         name = f"""{frame_idx:05d}_{'yes' if pts2d is not None else 'no'}.jpg"""
         cv2.imwrite(str(Path(clip_dir)/str(name)), cropped_frame[:,:,[2,1,0]], [int(cv2.IMWRITE_JPEG_QUALITY), 100])
+        callback((frame_idx+1)/len(df_fan) * 100)
         
     df_fan['cropped_pts2d'] = cropped_pts2ds 
     df_fan['cropped_box'] = [np.array([x1, y1, x2, y2])]*len(df_fan)
@@ -324,7 +326,10 @@ def crop_and_save(path, df_fan, offset_y, margin, clip_dir):
     
     
 # df_fan_info 와 기능은 동일하고, 메모리 사용량만 줄임
-def df_fan_info2(path, box, verbose=False):
+def df_fan_info2(path, box, callback=None, verbose=False):
+    callback1 = callback_inter(callback, min_per=0, max_per=90, desc='df_fan_info2 - 1', verbose=verbose)
+    callback2 = callback_inter(callback, min_per=90, max_per=100, desc='df_fan_info2 - 2', verbose=verbose)
+    
     x1, y1, x2, y2 = box
     
     def fan_info(f):
@@ -343,9 +348,11 @@ def df_fan_info2(path, box, verbose=False):
             pts3d = pts3d + (x1y1 +(0,))
         return box, pts2d, pts3d
     
-    def __fan_info(f, size):
+    def __fan_info(f, size, idx, max_idx):
         f = np.frombuffer(f, dtype=np.uint8)
         f = f.reshape(size[1], size[0], 3)
+        # 진행상황 공유
+        callback1((idx+1)/max_idx*100)
         return fan_info(f)
     
     reader = imageio_ffmpeg.read_frames(str(path))
@@ -353,19 +360,25 @@ def df_fan_info2(path, box, verbose=False):
     size = meta["size"]
     
     frame_cnt, _ = imageio_ffmpeg.count_frames_and_secs(str(path))
-    fi = {idx:__fan_info(frame, size)
+    fi = {idx:__fan_info(frame, size, idx=idx, max_idx=frame_cnt)
           for idx, frame in tqdm(enumerate(reader), total=frame_cnt, desc='■ fan ', disable=not verbose)}
     fi = {idx: to_full(*info, (x1, y1)) for idx, info in fi.items()}
     
     df = pd.DataFrame(fi.values(), columns=['box', 'pts2d', 'pts3d'])
     df['frame_idx'] = list(fi.keys())
+    callback2(100)
     return df
     
 
 
 # save_crop_info 와 기능은 동일하고, 메모리 사용량을 줄인 것
 def save_crop_info2(anchor_box_path, mp4_path, out_dir, make_mp4=False, 
-                    crop_offset_y = -0.1, crop_margin=0.4, verbose=False):
+                    crop_offset_y = -0.1, crop_margin=0.4, callback=None, verbose=False):
+    
+    callback1 = callback_inter(callback, min_per=0, max_per=5, desc='save_crop_info2 - 1', verbose=verbose)
+    callback2 = callback_inter(callback, min_per=5, max_per=70, desc='save_crop_info2 - 2', verbose=verbose)
+    callback3 = callback_inter(callback, min_per=70, max_per=100, desc='save_crop_info2 - 3', verbose=verbose)
+    
     df_anchor_i = pd.read_pickle(anchor_box_path)
     
     # 얼굴이 모두 들어가는 박스 크기를 구한다.
@@ -388,12 +401,19 @@ def save_crop_info2(anchor_box_path, mp4_path, out_dir, make_mp4=False,
     if Path(pickle_path).exists():
         return pickle_path
     
+    callback1(100)
+    
     # FAN 이 얼굴과 피처 포인트를 구한다.
-    df = df_fan_info2(mp4_path, box, verbose=verbose)
+    df = df_fan_info2(mp4_path, box, callback2, verbose=verbose)
     
     # 모델에 입력할 박스를 다시 구해서 crop 한다.
     # crop 박스 영역은 피쳐 포인트 기반으로 구한다.
-    df = crop_and_save(mp4_path, df,  offset_y=crop_offset_y,  margin=crop_margin, clip_dir=clip_dir)
+    df = crop_and_save(mp4_path, df,
+                       offset_y=crop_offset_y,
+                       margin=crop_margin,
+                       clip_dir=clip_dir,
+                       callback=callback3,
+                       verbose=verbose)
     if df is None:
         return None
     df.to_pickle(pickle_path)
