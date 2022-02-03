@@ -377,14 +377,13 @@ def save_face_info3(mp4_path, ebd_아나운서, base='./', verbose=False):
     if verbose:
         print('df_anchor_i:', str(dst))
     if not Path(dst).exists():      
-        val_end = get_valid_end(mp4_path, end=None, stride=1)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         df = pd.read_pickle(df_face_info_path)
         df_ = df.sort_values('similaraty', ascending=False).drop_duplicates(['frame_idx'])
         df_ = df_.query('similaraty >= 0.3')
         #display(df_.groupby('frame_idx').count())
         #pdb.set_trace()
-        df_face_info = face_info_to_anchor(df_, val_end)
+        df_face_info = face_info_to_anchor(df_, val_end=None)
         df_face_info.to_pickle(dst)
         return [dst]
     return [dst]
