@@ -25,6 +25,7 @@ def get_crop_mp4_dir(preprocess_dir, video_path):
 
 class _CallBack(object):
     def __init__(self, callback, min_per, max_per, desc, verbose=False):
+        assert(max_per > min_per)
         self.callback = callback
         self.min_per = min_per
         self.max_per = max_per
@@ -40,7 +41,7 @@ class _CallBack(object):
         if self.callback is None: return
         my_per = self.min_per + (per+1) / 100.0 * (self.max_per - self.min_per)
         my_per = int(my_per)
-        if my_per - self.last_per >= self.callback_interval and my_per % self.callback_interval == 0:
+        if my_per - self.last_per >= self.callback_interval:
             #if self.verbose:
             #    print(self.desc, ' : ', my_per)
             self.callback(my_per)
