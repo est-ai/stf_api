@@ -118,7 +118,7 @@ def dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav, fps, video_
     au.close()
     del au
         
-    return sorted(audios + images)
+    return sorted(audios) + sorted(images)
 
 
 # model inference 한다.
@@ -153,7 +153,7 @@ def inference_model(template, val_images, device, callback=None, verbose=False):
         return img
     
         
-    for idx, (img_gt, mel, ips) in tqdm(enumerate(dl), desc='inference model', disable=not verbose):
+    for idx, (img_gt, mel, ips) in tqdm(enumerate(dl), total=len(dl), desc='inference model', disable=not verbose):
         audio = mel.unsqueeze(1).to(device)
         ips = ips.to(device).permute(0, 3, 1, 2)
         with torch.no_grad():
