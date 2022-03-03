@@ -20,7 +20,16 @@ from .transform_history import mask_img_trsfs
 def frame_id(fname):
     return int(os.path.basename(fname).split('_')[0])
 
-def choose_ip_frame(frames, gt_frame, num_ips):
+def choose_ip_frame(frames, gt_frame, num_ips, phase):
+    # 생성하려는 프레임과 동일한 프레임을 친구프레임으로 준다.
+    if phase == 'val':
+        d = os.path.dirname(frames[0])
+        return [os.path.join(d, gt_frame) for _ in range(num_ips)]
+    # 0번프레임을 무조건 친구 프레임으로 준다.
+    #if phase == 'val':
+    #    return [frames[0] for _ in range(num_ips)]
+
+    # 랜덤하게 골라준다.
     frames = [f for f in frames if np.abs(frame_id(gt_frame) - frame_id(f)) >= 12]
     if len(frames) < num_ips:
         return None
@@ -214,7 +223,7 @@ class LipGanDS(Dataset):
             if sum(np.isnan(mel.flatten())) > 0:
                 return None
         
-        ip_fnames = choose_ip_frame(frames, gt_fname, self.num_ips)
+        ip_fnames = choose_ip_frame(frames, gt_fname, self.num_ips, self.phase)
         if ip_fnames is None:
             print('return None')
             return None

@@ -250,6 +250,7 @@ def compose(template, model_outs, video_start_offset_frame, full_imgs, n_compose
 
 
 # 음성과 video sync 를 위해 적당히 정해진 crop_start_frame 만큼 잘라낸다.
+# 길이를 유지하기 위해 잘라낸 것 만큼 동일 이미지를 반복한다.
 def crop_start_frame(images, crop_cnt):
     if crop_cnt >= 0:
         images2 = images[crop_cnt:] + ([images[-1]]*crop_cnt)
@@ -257,7 +258,9 @@ def crop_start_frame(images, crop_cnt):
         images2 = ([images[0]]*abs(crop_cnt)) + images[:crop_cnt]
     assert(len(images) == len(images2))
     return images2
-    
+
+
+# 음성과 video sync 를 위해 적당히 정해진 crop_start_frame 만큼 잘라낸다.
 
 # 비디오 쓰기(composed 이미지들을 하나의 video 로 만든다.)
 def write_video(composed, wav_path, fps, output_path, slow_write, verbose=False):
@@ -438,7 +441,10 @@ def get_compose_func(template, verbose=False):
             mask[s:height-s,        width-e:width-s, :] = g
         return mask
     
-    mask = get_mask(x2-x1+1,y2-y1+1,int((x2-x1)*0.1))
+    gradation_width = int((y2-y1)*0.1)
+    if verbose:
+        print('gradation_width : ', gradation_width)
+    mask = get_mask(x2-x1+1,y2-y1+1,gradation_width)
     mask_crop = mask
     mask_origin = (mask - 1) * -1    
     
@@ -549,9 +555,18 @@ def write_video3(out_path, compose_func, model_out, template_video_path,
     
     writer.send(None)  # seed the generator
     try:
-        for idx, (o, f) in tqdm(enumerate(zip(model_out, reader)),
+        for idx, (o, f, _) in tqdm(enumerate(zip(model_out, reader, range(len(model_out)-crop_start_frame_count))),
                          total=len(model_out), desc="compose (model out, template)",
                          disable=not verbose):
+            f = np.frombuffer(f, dtype=np.uint8)
+            #print(f.shape, size, f.dtype)
+            f = f.reshape(size[1], size[0], 3)
+            frame = compose_func(o, f)
+            writer.send(frame)  # seed the generator
+            callback(idx/len(model_out)*100)
+        for _ in tqdm(range(crop_start_frame_count),
+                      total=crop_start_frame_count, desc="compose (model out, template)",
+                      disable=not verbose):
             f = np.frombuffer(f, dtype=np.uint8)
             #print(f.shape, size, f.dtype)
             f = f.reshape(size[1], size[0], 3)

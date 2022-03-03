@@ -673,6 +673,44 @@ def calc_poly_pwb_side_v39_12(pts, h, randomness=True):
     return np.round(np.array(pts)).astype(np.int32)
 
 
+def calc_poly_pwb_side_v39_13(pts, h, randomness=True):
+    
+    def rand(a, b):
+        if randomness:
+            r = random.random()
+            return a + (b-a)*r
+        else:
+            return (a+b)/2
+    
+    p0 = pts[27]
+    y10 = h*0.80
+    y6 =  y10
+    y8 =  y10
+    
+    p15 = pts[15] + rand(0.20, 0.28)*(pts[15] - p0)
+    p13 = pts[13] + rand(0.20, 0.28)*(pts[13] - pts[30])
+    p12 = pts[12] + rand(0.20, 0.28)*(pts[12] - pts[30])
+    p11 = pts[11] + rand(0.20, 0.28)*(pts[11] - pts[30])
+    p11[0] = pts[11][0] + rand(0.18, 0.22)*(pts[11][0] - pts[30][0])
+    
+    p36 = pts[36]  + rand(0.12, 0.18)*(pts[36] - pts[30])
+    p45 = pts[45]  + rand(0.12, 0.18)*(pts[45] - pts[30])
+    
+    p05 = pts[5]  + rand(0.12, 0.18)*(pts[5] - pts[30])
+    p05[0] = pts[5][0]  + rand(0.18, 0.22)*(pts[5][0] - pts[30][0])
+    
+    p04 = pts[4]  + rand(0.12, 0.18)*(pts[4] - pts[30])
+    p03 = pts[3]  + rand(0.12, 0.18)*(pts[3] - pts[30])
+    p01 = pts[1]  + rand(0.12, 0.18)*(pts[1] - p0)
+    
+    p36[1] = y10
+    p45[1] = y10 
+    
+    #pts = [p0, p15, p13, p45, p36, p05, p04, p03, p01]
+    pts = [p0, p15, p13, p45, p36, p04, p03, p01]
+    return np.round(np.array(pts)).astype(np.int32)
+
+
 def calc_poly_pwb_front_v39_1(pts, h, randomness=True):
     
     def rand_(a, b, randomness=True):
@@ -726,6 +764,7 @@ calc_poly = {
     'pwb_side_v39_1': calc_poly_pwb_side_v39_1,
     'pwb_side_v39_11': calc_poly_pwb_side_v39_11,
     'pwb_side_v39_12': calc_poly_pwb_side_v39_12,
+    'pwb_side_v39_13': calc_poly_pwb_side_v39_13,
     'pwb_front_v39_0': calc_poly_pwb_front_v39_0,
     'pwb_front_v39_1': calc_poly_pwb_front_v39_1
 }
