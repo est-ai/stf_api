@@ -143,7 +143,8 @@ def inference_model(template, val_images, device, callback=None, verbose=False):
     args.val_images = val_images
     
     ds = LipGanDS(args, 'val')
-    dl = DataLoader(dataset=ds, batch_size=args.batch_size, num_workers=args.num_workers)
+    dl = DataLoader(dataset=ds, batch_size=args.batch_size, num_workers=args.num_workers,
+                   worker_init_fn=seed_worker)
 
     outs = []
     def to_img(t):

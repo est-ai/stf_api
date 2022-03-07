@@ -2,6 +2,9 @@ import json
 from addict import Dict
 from pathlib import Path
 import pdb
+import torch
+import numpy as np
+import random
 
 
 def read_config(config_path):
@@ -78,3 +81,23 @@ def callback_test():
     for i in range(0,101,1):
         callback3(i)
         
+        
+def fix_seed(random_seed):
+    """
+    fix seed to control any randomness from a code 
+    (enable stability of the experiments' results.)
+    """
+    torch.manual_seed(random_seed)
+    torch.cuda.manual_seed(random_seed)
+    torch.cuda.manual_seed_all(random_seed)  # if use multi-GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(random_seed)
+    random.seed(random_seed)
+    
+    
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+

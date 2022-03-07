@@ -7,6 +7,9 @@ from .util import *
 from .s2f_dir.src import autoencoder as ae 
 
 
+g_fix_seed = False
+
+
 class ModelInfo():
     def __init__(self, model, args, device, work_root_path, config_path, checkpoint_path, verbose=False):
         self.model = model
@@ -22,9 +25,21 @@ class ModelInfo():
         if self.verbose:
             print('del model , gc:',  sys.getrefcount(self.model))
         del self.model
-        
+
+
+def __init_fix_seed(random_seed, verbose=False):
+    global g_fix_seed
+    if g_fix_seed == True:
+        return
+    
+    if verbose:
+        print('fix seed')
+    fix_seed(random_seed)
+    g_fix_seed = True
+
         
 def create_model(config_path, checkpoint_path, work_root_path, device, verbose=False):
+    __init_fix_seed(random_seed=1234, verbose=verbose)
     if verbose:
         print('load model')
 
