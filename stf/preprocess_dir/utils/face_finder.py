@@ -264,13 +264,13 @@ def save_face_info(mp4_path, ebd_아나운서, base='./df_face_info'):
     return save_splited_face_info(mp4_path, ebd_아나운서)     
 
 
-def face_info_to_anchor(df, val_end=None):
+def face_info_to_anchor(df, stride, val_end=None):
     if val_end is None:
         last_idx = df['frame_idx'].max()
         val_end = last_idx
     rows = []
     for idx in range(val_end+1):
-        target_idx = idx//30 *30
+        target_idx = idx//stride *stride
         df_search = df.query('frame_idx == @target_idx')
         assert(len(df_search) > 0)
         box, _, _, sim = df_search.iloc[0].values
@@ -286,10 +286,12 @@ def save_face_info2(mp4_path, ebd_아나운서, base='./', verbose=False):
     df_face_info_path = os.path.join(base,'df_face_info', f"{str(Path(mp4_path).stem)}.pickle")
     if verbose:
         print('save_face_info2 - df_face_info: ', str(df_face_info_path))
+
+    fps = video_meta(mp4_path)['fps']
+    stride = round(fps)*1
     
     if not Path(df_face_info_path).exists():
-        fps = video_meta(mp4_path)['fps']
-        r = get_face_info(mp4_path, ebd_아나운서, 0, -1, stride=round(fps)*1, verbose=verbose)
+        r = get_face_info(mp4_path, ebd_아나운서, 0, -1, stride=stride, verbose=verbose)
         frames, df_face_info, df_아나운서_only  = r
         del frames
         gc.collect()
@@ -306,7 +308,7 @@ def save_face_info2(mp4_path, ebd_아나운서, base='./', verbose=False):
         df_ = df_.query('similaraty >= 0.3')
         #display(df_.groupby('frame_idx').count())
         #pdb.set_trace()
-        df_face_info = face_info_to_anchor(df_, val_end=None)
+        df_face_info = face_info_to_anchor(df_, stride=stride, val_end=None)
         df_face_info.to_pickle(dst)
         return [dst]
     return [dst]
@@ -374,9 +376,10 @@ def save_face_info3(mp4_path, ebd_아나운서, base='./', callback=None, verbos
     callback1 = callback_inter(callback, min_per=0, max_per=90, desc='save_face_info3 - 1', verbose=verbose)
     callback2 = callback_inter(callback, min_per=90, max_per=100, desc='save_face_info3 - 2', verbose=verbose)
     
+    fps = video_meta(mp4_path)['fps']
+    stride = round(fps)*1
     if not Path(df_face_info_path).exists():
-        fps = video_meta(mp4_path)['fps']
-        r = get_face_info2(mp4_path, ebd_아나운서, stride=round(fps)*1, callback=callback1, verbose=verbose)
+        r = get_face_info2(mp4_path, ebd_아나운서, stride=stride, callback=callback1, verbose=verbose)
         df_face_info, df_아나운서_only  = r
         os.makedirs(os.path.dirname(df_face_info_path), exist_ok=True)
         df_face_info.to_pickle(df_face_info_path)
@@ -391,7 +394,7 @@ def save_face_info3(mp4_path, ebd_아나운서, base='./', callback=None, verbos
         df_ = df_.query('similaraty >= 0.3')
         #display(df_.groupby('frame_idx').count())
         #pdb.set_trace()
-        df_face_info = face_info_to_anchor(df_, val_end=None)
+        df_face_info = face_info_to_anchor(df_, stride=stride, val_end=None)
         df_face_info.to_pickle(dst)
         return [dst]
     callback2(100)
