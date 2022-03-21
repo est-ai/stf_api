@@ -5,7 +5,7 @@ import imageio
 import sys
 import gc
 from .util import *
-from .gen_video import gen_video, gen_video2, gen_video3
+from .gen_video import gen_video, gen_video2, gen_video3, gen_video4
 
     
 # template video 전처리
@@ -192,6 +192,22 @@ class TemplateVideo():
         if out_path is None:
             out_path = 'temp.mp4'
         return gen_video3(self,
+                         wav_path=wav_path,
+                         wav_std=wav_std,
+                         wav_std_ref_wav=wav_std_ref_wav,
+                         video_start_offset_frame=video_start_offset_frame,
+                         out_path=out_path,
+                         head_only=head_only,
+                         slow_write=slow_write,
+                         callback=callback,
+                         verbose=self.verbose)
+
+
+    def gen4(self, wav_path, wav_std, wav_std_ref_wav, video_start_offset_frame,
+             head_only=False, slow_write=True, out_path=None, callback=None):
+        if out_path is None:
+            out_path = 'temp.mp4'
+        return gen_video4(self,
                          wav_path=wav_path,
                          wav_std=wav_std,
                          wav_std_ref_wav=wav_std_ref_wav,

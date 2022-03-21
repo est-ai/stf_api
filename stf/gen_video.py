@@ -24,7 +24,13 @@ from .preprocess_dir.utils import crop_with_fan as cwf
 from .preprocess_dir.utils import make_mels as mm 
 import imageio_ffmpeg 
 from joblib import Parallel, delayed
+from PIL import Image
+import threading
+from queue import Queue
 
+
+# 임시 global 변수 담는 곳
+global_v_ = {}
 
 # model inference 를 위해 audio 파일을 준비시킨다. (wav 길이만큼 dummy 이미지 생성, mel 생성)
 def audio_crop(wav_std, wav_std_ref_wav, wav_path, crop_wav_dir, video_fps, verbose=False):
@@ -121,8 +127,10 @@ def dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav, fps, video_
     return sorted(audios) + sorted(images)
 
 
+#g_save_image = False
 # model inference 한다.
 def inference_model(template, val_images, device, callback=None, verbose=False):
+    #global g_save_image
     mask_ver = template.model.args.mask_ver
     #args = Dict(
     #    batch_size = 32,
@@ -156,22 +164,92 @@ def inference_model(template, val_images, device, callback=None, verbose=False):
         
     for idx, (img_gt, mel, ips) in tqdm(enumerate(dl), total=len(dl), desc='inference model', disable=not verbose):
         audio = mel.unsqueeze(1).to(device)
+        #if g_save_image:
+        #    print()
+        #    save_img_before = to_img(ips[0].clone())
+        #    print(save_img_before.shape)
+        #    Image.fromarray(save_img_before[:,:,:3]).save('./temp_before.png')
         ips = ips.to(device).permute(0, 3, 1, 2)
         with torch.no_grad():
             pred = template.model.model(ips, audio)
         gen_face = to_img(pred.permute(0, 2, 3, 1))
         outs += list(gen_face)
         callback(idx/len(dl)*100)
-        
+        #if g_save_image:
+        #    Image.fromarray(gen_face[0]).save('./temp_after.png')
+        #    g_save_image = False
+
     # BGR -> RBG
     imgs = [im[:,:,[2,1,0]] for im in outs]
+
+
                                          
     del dl
     del ds
     del args
-    del outs 
+    del outs
 
     return imgs
+
+
+# generator : model inference 한다. 
+def gen_inference_model(template, val_images, device, verbose=False):
+    global g_save_image
+    mask_ver = template.model.args.mask_ver
+    #args = Dict(
+    #    batch_size = 32,
+    #    num_workers = 8,
+    #    fps = video_fps,
+    #    mel_step_size = 108, #81,
+    #    mel_ps = 80,
+    #    val_images = sorted(audios + images),
+    #    img_size = 352,
+    #    mask_ver = mask_ver,
+    #    num_ips = 2,
+    #    mask_img_trsf_ver = 0,
+    #    mel_trsf_ver = -1,
+    #    mel_norm_ver = -1,
+    #    lr = 1, # dummy_lr
+    #)
+    args = copy.deepcopy(template.model.args)
+    args.val_images = val_images
+    
+    ds = LipGanDS(args, 'val')
+    dl = DataLoader(dataset=ds, batch_size=args.batch_size, num_workers=args.num_workers,
+                   worker_init_fn=seed_worker)
+
+    outs = []
+    def to_img(t):
+        img = t.cpu().numpy().astype(np.float64)
+        img = ((img / 2.0) + 0.5) * 255.0
+        img = np.clip(img, 0.0, 255.0).astype(np.uint8)
+        return img
+    
+        
+    for idx, (img_gt, mel, ips) in enumerate(dl):
+        audio = mel.unsqueeze(1).to(device)
+        if g_save_image:
+            save_img_before = to_img(ips[0].clone())
+            print(save_img_before.shape)
+            Image.fromarray(save_img_before[:,:,:3]).save('./temp_before.png')
+        ips = ips.to(device).permute(0, 3, 1, 2)
+        with torch.no_grad():
+            pred = template.model.model(ips, audio)
+        gen_face = to_img(pred.permute(0, 2, 3, 1))
+        # BGR -> RBG
+        gen_face = gen_face[:,:,[2,1,0]]
+        gen_face = list(gen_face)
+        for o in gen_face:
+            yield o
+        outs += gen_face
+        if g_save_image:
+            Image.fromarray(gen_face[0]).save('./temp_after.png')
+            g_save_image = False
+
+                                         
+    del dl
+    del ds
+    del args
 
 
 # template video 의 frame 과 model inference 결과를 합성한다.
@@ -580,4 +658,154 @@ def write_video3(out_path, compose_func, model_out, template_video_path,
         pass
         
     writer.close()
+
+
+def write_video_in_thread(out_path, compose_func, task_name, template_video_path,
+                 wav_path, fps, crop_start_frame_count, total_cnt,
+                 output_path, slow_write,
+                 verbose=False):
+    global global_v_
     
+    if verbose:
+        print('[5/5] 비디오 합성 함수... ')
+        print(f"save video {out_path}")
+    
+    # 합성하면서 비디오 생성
+    ffmpeg_params = None
+    if slow_write:
+        ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+
+    # document : https://github.com/imageio/imageio-ffmpeg
+    reader = imageio_ffmpeg.read_frames(template_video_path)
+    meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+    size = meta["size"]
+    if verbose:
+        print(meta)
+    assert(crop_start_frame_count >= 0)
+    
+    # crop_start_frame_count 만큼 앞에서 버린다.
+    if crop_start_frame_count > 0:
+        # 개수를 조정해준다.
+        total_cnt = total_cnt - crop_start_frame_count
+        # model output 버린다.
+        for i in range(crop_start_frame_count):
+            global_v_[task_name].get()
+            #print('crop:', i)
+            pass
+        # TODO snow : 왜인지 모르겠지만, crop_start_frame_count-1 로 해야지만 프레임이 맞는다.
+        for f, i in zip(reader, range(crop_start_frame_count-1)):
+            #print('crop:', i)
+            pass
+    
+    writer = imageio_ffmpeg.write_frames(out_path,
+                                         size = size,
+                                         fps=fps,
+                                         ffmpeg_log_level='error',
+                                         quality = 10, # 0~10
+                                         output_params=ffmpeg_params,
+                                         audio_path = wav_path, )
+    
+    writer.send(None)  # seed the generator
+    try:
+        for idx, (f, _) in tqdm(enumerate(zip(reader, range(total_cnt-crop_start_frame_count))),
+                         total=total_cnt, desc="compose (model out, template)",
+                         disable=not verbose):
+            o = global_v_[task_name].get()
+            if o is None:
+                print('alread None??!!!')
+                break
+            #print('worker:', idx, ', th:', threading.get_ident())
+            
+            f = np.frombuffer(f, dtype=np.uint8)
+            #print(f.shape, size, f.dtype)
+            f = f.reshape(size[1], size[0], 3)
+            frame = compose_func(o, f)
+            writer.send(frame)  # seed the generator
+        for _ in tqdm(range(crop_start_frame_count),
+                      total=crop_start_frame_count, desc="compose (model out, template)",
+                      disable=not verbose):
+            f = np.frombuffer(f, dtype=np.uint8)
+            #print(f.shape, size, f.dtype)
+            f = f.reshape(size[1], size[0], 3)
+            frame = compose_func(o, f)
+            writer.send(frame)  # seed the generator
+    except Exception as e:
+        print('exception read template video stream', e)
+        raise Exception('except than template video', e)
+        pass
+        
+    writer.close()
+    
+
+def get_task_name():
+    global global_v_
+    while 1:
+        task_name = random.randint(0, 10000000) # 동시에 여러개 하더라도 각자 할 수 있도록 이름을 준다.
+        if task_name in global_v_:
+            print('!!!!! exist task, task_names:', global_v_.keys())
+            continue
+        else:
+            return task_name
+
+    
+# model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
+# 속도 개선 : inference, write_video 동시에..
+def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
+               video_start_offset_frame, out_path,
+               head_only=False,
+               slow_write=True,
+               callback=None,
+               verbose=False):
+    global global_v_
+    callback_ = callback_inter(callback, min_per=0, max_per=30,
+                               desc='gen_video3 1', verbose=verbose)
+    
+    device = template.model.device
+    fps = template.fps
+        
+    # model inference 를 위한 데이터 준비
+    val_images = dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav,
+                                    fps=fps,
+                                    video_start_offset_frame=video_start_offset_frame,
+                                    verbose=verbose)
+    if verbose:
+        print('len(val_images) : ', len(val_images))
+
+    # model inference
+    gen_infer = gen_inference_model(template, val_images, device, verbose=verbose)
+        
+    task_name = get_task_name()
+    global_v_[task_name] = Queue() # 작업큐
+    
+    # 함성함수를 얻는다.
+    compose_func = get_compose_func(template, verbose=verbose)
+
+    # 전체 inference 이미지 개수를 얻는다.
+    total_cnt = int(len(val_images)/2)
+
+    # write video worker 실행
+    args = (out_path, compose_func, task_name, template.template_video_path,
+            wav_path, fps, template.model.args.crop_start_frame, total_cnt,
+            out_path, slow_write, verbose)
+    thread = threading.Thread(target=write_video_in_thread, args=args)
+    thread.start()
+    
+    # model inference
+    for i, v in enumerate(gen_infer):
+        global_v_[task_name].put(v)
+        # TODO snow : 원래는 queue에 몇개가 소진되었나로 해야하지만.. 일단 이렇게 한다.
+        process_cnt = i + 1 - global_v_[task_name].qsize()
+        callback_(process_cnt*100/total_cnt) 
+    global_v_[task_name].put(None) # 이제 끝났음을 알림
+    
+    # write video worker 완료 대기
+    thread.join()
+    callback_(100)
+    
+    del val_images
+    gc.collect()
+
+    global_v_[task_name] = None
+    
+    return out_path
+
