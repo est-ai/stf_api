@@ -791,9 +791,6 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
     
     # model inference
     for i, v in enumerate(gen_infer):
-        if i < 3:
-            print('main', v.shape)
-            Image.fromarray(v).save(f'model_out_{i}.jpg')
         global_v_[task_name].put(v)
         # TODO snow : 원래는 queue에 몇개가 소진되었나로 해야하지만.. 일단 이렇게 한다.
         process_cnt = i + 1 - global_v_[task_name].qsize()
