@@ -219,7 +219,6 @@ def gen_inference_model(template, val_images, device, verbose=False):
     dl = DataLoader(dataset=ds, batch_size=args.batch_size, num_workers=args.num_workers,
                    worker_init_fn=seed_worker)
 
-    outs = []
     def to_img(t):
         img = t.cpu().numpy().astype(np.float64)
         img = ((img / 2.0) + 0.5) * 255.0
@@ -237,12 +236,11 @@ def gen_inference_model(template, val_images, device, verbose=False):
         with torch.no_grad():
             pred = template.model.model(ips, audio)
         gen_face = to_img(pred.permute(0, 2, 3, 1))
-        # BGR -> RBG
-        gen_face = gen_face[:,:,[2,1,0]]
         gen_face = list(gen_face)
+        # BGR -> RBG
+        gen_face = [v[:,:,[2,1,0]] for v in gen_face]
         for o in gen_face:
             yield o
-        outs += gen_face
         if g_save_image:
             Image.fromarray(gen_face[0]).save('./temp_after.png')
             g_save_image = False
@@ -793,6 +791,9 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
     
     # model inference
     for i, v in enumerate(gen_infer):
+        if i < 3:
+            print('main', v.shape)
+            Image.fromarray(v).save(f'model_out_{i}.jpg')
         global_v_[task_name].put(v)
         # TODO snow : 원래는 queue에 몇개가 소진되었나로 해야하지만.. 일단 이렇게 한다.
         process_cnt = i + 1 - global_v_[task_name].qsize()
