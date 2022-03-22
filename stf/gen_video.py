@@ -191,6 +191,7 @@ def inference_model(template, val_images, device, callback=None, verbose=False):
 
     return imgs
 
+g_save_image = False
 
 # generator : model inference 한다. 
 def gen_inference_model(template, val_images, device, verbose=False):
