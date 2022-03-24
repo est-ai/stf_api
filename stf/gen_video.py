@@ -706,12 +706,12 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
     
     writer.send(None)  # seed the generator
     try:
-        for idx, (f, _) in tqdm(enumerate(zip(reader, range(total_cnt-crop_start_frame_count))),
+        for idx, (f, _) in tqdm(enumerate(zip(reader, range(total_cnt))),
                          total=total_cnt, desc="compose (model out, template)",
                          disable=not verbose):
             o = global_v_[task_name].get()
             if o is None:
-                print('alread None??!!!')
+                print('already None??!!!')
                 break
             #print('worker:', idx, ', th:', threading.get_ident())
             
@@ -724,7 +724,7 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
                       total=crop_start_frame_count, desc="compose (model out, template)",
                       disable=not verbose):
             f = np.frombuffer(f, dtype=np.uint8)
-            #print(f.shape, size, f.dtype)
+            #print('add...')
             f = f.reshape(size[1], size[0], 3)
             frame = compose_func(o, f)
             writer.send(frame)  # seed the generator
