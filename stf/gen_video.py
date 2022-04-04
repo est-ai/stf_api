@@ -129,6 +129,7 @@ def dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav, fps, video_
 
 #g_save_image = False
 # model inference 한다.
+g_img__ = None
 def inference_model(template, val_images, device, callback=None, verbose=False):
     #global g_save_image
     mask_ver = template.model.args.mask_ver
@@ -156,28 +157,28 @@ def inference_model(template, val_images, device, callback=None, verbose=False):
 
     outs = []
     def to_img(t):
-        img = t.cpu().numpy().astype(np.float64)
-        img = ((img / 2.0) + 0.5) * 255.0
-        img = np.clip(img, 0.0, 255.0).astype(np.uint8)
+        img = ((t / 2.0) + 0.5) * 255.0
+        img = torch.clip(img, 0.0, 255.0).type(torch.uint8)
+        img = img.cpu().numpy()
         return img
     
         
-    for idx, (img_gt, mel, ips) in tqdm(enumerate(dl), total=len(dl), desc='inference model', disable=not verbose):
-        audio = mel.unsqueeze(1).to(device)
-        #if g_save_image:
-        #    print()
-        #    save_img_before = to_img(ips[0].clone())
-        #    print(save_img_before.shape)
-        #    Image.fromarray(save_img_before[:,:,:3]).save('./temp_before.png')
-        ips = ips.to(device).permute(0, 3, 1, 2)
-        with torch.no_grad():
+    with torch.no_grad():
+        #img_gt, mel, ips_org = next(iter(dl))
+        #for idx in tqdm(range(len(dl))):
+        #    ips = ips_org.to(device).permute(0, 3, 1, 2)
+        for idx, (img_gt, mel, ips) in tqdm(enumerate(dl), total=len(dl), desc='inference model', disable=not verbose):
+            audio = mel.unsqueeze(1).to(device)
+            ips = ips.to(device).permute(0, 3, 1, 2)
+
             pred = template.model.model(ips, audio)
-        gen_face = to_img(pred.permute(0, 2, 3, 1))
-        outs += list(gen_face)
-        callback(idx/len(dl)*100)
-        #if g_save_image:
-        #    Image.fromarray(gen_face[0]).save('./temp_after.png')
-        #    g_save_image = False
+            gen_face = to_img(pred.permute(0, 2, 3, 1))
+
+            outs += list(gen_face)
+            callback(idx/len(dl)*100)
+            #if g_save_image:
+            #    Image.fromarray(gen_face[0]).save('./temp_after.png')
+            #    g_save_image = False
 
     # BGR -> RBG
     imgs = [im[:,:,[2,1,0]] for im in outs]
@@ -191,27 +192,10 @@ def inference_model(template, val_images, device, callback=None, verbose=False):
 
     return imgs
 
-g_save_image = False
 
 # generator : model inference 한다. 
 def gen_inference_model(template, val_images, device, verbose=False):
-    global g_save_image
     mask_ver = template.model.args.mask_ver
-    #args = Dict(
-    #    batch_size = 32,
-    #    num_workers = 8,
-    #    fps = video_fps,
-    #    mel_step_size = 108, #81,
-    #    mel_ps = 80,
-    #    val_images = sorted(audios + images),
-    #    img_size = 352,
-    #    mask_ver = mask_ver,
-    #    num_ips = 2,
-    #    mask_img_trsf_ver = 0,
-    #    mel_trsf_ver = -1,
-    #    mel_norm_ver = -1,
-    #    lr = 1, # dummy_lr
-    #)
     args = copy.deepcopy(template.model.args)
     args.val_images = val_images
     
@@ -220,31 +204,25 @@ def gen_inference_model(template, val_images, device, verbose=False):
                    worker_init_fn=seed_worker)
 
     def to_img(t):
-        img = t.cpu().numpy().astype(np.float64)
-        img = ((img / 2.0) + 0.5) * 255.0
-        img = np.clip(img, 0.0, 255.0).astype(np.uint8)
+        img = ((t / 2.0) + 0.5) * 255.0
+        img = torch.clip(img, 0.0, 255.0).type(torch.uint8)
+        img = img.cpu().numpy()
         return img
-    
         
-    for idx, (img_gt, mel, ips) in enumerate(dl):
-        audio = mel.unsqueeze(1).to(device)
-        if g_save_image:
-            save_img_before = to_img(ips[0].clone())
-            print(save_img_before.shape)
-            Image.fromarray(save_img_before[:,:,:3]).save('./temp_before.png')
-        ips = ips.to(device).permute(0, 3, 1, 2)
-        with torch.no_grad():
-            pred = template.model.model(ips, audio)
-        gen_face = to_img(pred.permute(0, 2, 3, 1))
-        gen_face = list(gen_face)
-        # BGR -> RBG
-        gen_face = [v[:,:,[2,1,0]] for v in gen_face]
-        for o in gen_face:
-            yield o
-        if g_save_image:
-            Image.fromarray(gen_face[0]).save('./temp_after.png')
-            g_save_image = False
+    with torch.no_grad():
+        for idx, (img_gt, mel, ips) in enumerate(dl):
+            audio = mel.unsqueeze(1).to(device)
+            ips = ips.to(device).permute(0, 3, 1, 2)
 
+            pred = template.model.model(ips, audio)
+    
+            gen_face = to_img(pred.permute(0, 2, 3, 1))
+    
+            # BGR -> RBG
+            gen_face = gen_face[:,:,:,[2,1,0]]
+            gen_face = list(gen_face)
+            for o in gen_face:
+                yield o
                                          
     del dl
     del ds
@@ -553,7 +531,7 @@ def gen_video3(template, wav_path, wav_std, wav_std_ref_wav,
                verbose=False):
     device = template.model.device
     fps = template.fps
-        
+
     callback1 = callback_inter(callback, min_per=0, max_per=30,
                                desc='gen_video3 1', verbose=verbose)
     callback2 = callback_inter(callback, min_per=30, max_per=100,
@@ -586,10 +564,12 @@ def gen_video3(template, wav_path, wav_std, wav_std_ref_wav,
                  slow_write=slow_write,
                  callback=callback2,
                  verbose=verbose)
+
     del outs
     del val_images
     gc.collect()
     callback2(100)
+
     
     return out_path
 
@@ -606,7 +586,8 @@ def write_video3(out_path, compose_func, model_out, template_video_path,
     # 합성하면서 비디오 생성
     ffmpeg_params = None
     if slow_write:
-        ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+        #ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+        ffmpeg_params=['-acodec', 'aac', '-crf', '17']
 
     # document : https://github.com/imageio/imageio-ffmpeg
     reader = imageio_ffmpeg.read_frames(template_video_path)
@@ -672,7 +653,8 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
     # 합성하면서 비디오 생성
     ffmpeg_params = None
     if slow_write:
-        ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+        #ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+        ffmpeg_params=['-acodec', 'aac', '-crf', '17']
 
     # document : https://github.com/imageio/imageio-ffmpeg
     reader = imageio_ffmpeg.read_frames(template_video_path)
@@ -706,7 +688,7 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
     
     writer.send(None)  # seed the generator
     try:
-        for idx, (f, _) in tqdm(enumerate(zip(reader, range(total_cnt))),
+        for idx, (f, _) in tqdm(enumerate(zip(reader, range(total_cnt-crop_start_frame_count))),
                          total=total_cnt, desc="compose (model out, template)",
                          disable=not verbose):
             o = global_v_[task_name].get()
@@ -724,7 +706,7 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
                       total=crop_start_frame_count, desc="compose (model out, template)",
                       disable=not verbose):
             f = np.frombuffer(f, dtype=np.uint8)
-            #print('add...')
+            #print(f.shape, size, f.dtype)
             f = f.reshape(size[1], size[0], 3)
             frame = compose_func(o, f)
             writer.send(frame)  # seed the generator
@@ -746,7 +728,8 @@ def get_task_name():
         else:
             return task_name
 
-    
+
+import time
 # model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
 # 속도 개선 : inference, write_video 동시에..
 def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
@@ -755,13 +738,14 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
                slow_write=True,
                callback=None,
                verbose=False):
+    
+    #s = time.time()
     global global_v_
     callback_ = callback_inter(callback, min_per=0, max_per=30,
                                desc='gen_video3 1', verbose=verbose)
     
     device = template.model.device
     fps = template.fps
-        
     # model inference 를 위한 데이터 준비
     val_images = dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav,
                                     fps=fps,
@@ -772,7 +756,7 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
 
     # model inference
     gen_infer = gen_inference_model(template, val_images, device, verbose=verbose)
-        
+
     task_name = get_task_name()
     global_v_[task_name] = Queue() # 작업큐
     
@@ -791,12 +775,15 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
     
     # model inference
     for i, v in enumerate(gen_infer):
+        #if i < 3:
+        #    print('main', v.shape)
+        #    Image.fromarray(v).save(f'model_out_{i}.jpg')
         global_v_[task_name].put(v)
         # TODO snow : 원래는 queue에 몇개가 소진되었나로 해야하지만.. 일단 이렇게 한다.
         process_cnt = i + 1 - global_v_[task_name].qsize()
         callback_(process_cnt*100/total_cnt) 
     global_v_[task_name].put(None) # 이제 끝났음을 알림
-    
+
     # write video worker 완료 대기
     thread.join()
     callback_(100)
@@ -805,6 +792,8 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
     gc.collect()
 
     global_v_[task_name] = None
+    #print('end:', time.time() - s)
+
     
     return out_path
 

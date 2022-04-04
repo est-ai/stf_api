@@ -69,6 +69,9 @@ def inter_alg_(w, h, img):
     
 def resize_adapt(args, img):
     sz = args.img_size
+    h, w = img.shape[:2]
+    if h == sz and w == sz:
+        return img
     board = np.full((sz, sz, 3), 128, np.uint8)
     h, w = img.shape[:2]
     if True:
@@ -104,6 +107,9 @@ class LipGanDS(Dataset):
         self.num_ips = args.num_ips
         self.mel_trsf_ver = args.mel_trsf_ver
         self.mel_norm_ver = args.mel_norm_ver
+        self.mels = {}
+        self.preds = {}
+
         
         #self.half_window_size = self.calc_half_window_size(args.fps) 
         print(f'mel_step_size:{self.mel_step_size}, mel_ps:{args.mel_ps}')
@@ -190,6 +196,7 @@ class LipGanDS(Dataset):
             #g_cached_pickle[str(dir_name)] = preds
             return preds
         return g_cached_pickle[str(dir_name)]
+
     
     def choose(self, idx, images, ref_image_only=False, gt_audio_only=False):
         args = self.args
@@ -199,7 +206,6 @@ class LipGanDS(Dataset):
         dir_name = img_name.parent
         
         sidx = frame_id(gt_fname)
-        
         
         frames = self.get_frames(dir_name)
         if len(frames) < 12:
@@ -212,7 +218,9 @@ class LipGanDS(Dataset):
         if ref_image_only:
             mel = None
         else:
-            mel = self.load_mel(dir_name)
+            if dir_name not in self.mels.keys():
+                self.mels[dir_name] = self.load_mel(dir_name)
+            mel = self.mels[dir_name]
             fps = self.read_fps(dir_name)
             mel = get_audio_segment(gt_fname, mel, self.mel_step_size, self.mel_ps,
                                     fps, self.calc_half_window_size(fps))
@@ -227,21 +235,24 @@ class LipGanDS(Dataset):
         if ip_fnames is None:
             print('return None')
             return None
-        
+
         rng = random.randint(0, 65536*65536)
-        
-        img_gt = cv2.imread(str(img_name))
-        masked = self.mask_img_trsf(img_gt.copy(), rng)
-        
-        img_gt = resize_adapt(args, img_gt)
-        img_gt = self.mask_img_trsf(img_gt, rng)
-        
-        
+
         if gt_audio_only:
-            masked = np.zeros((16,16,3), np.uint8)
+            masked = np.zeros((args.img_size,args.img_size,3), np.uint8)
+            img_gt = masked
             pts = None
         else:
-            preds = self.read_pickle(dir_name)
+            #print(str(img_name)+'.resized.jpg')
+            img_gt = cv2.imread(str(img_name))
+            masked = self.mask_img_trsf(img_gt.copy(), rng)
+
+            img_gt = resize_adapt(args, img_gt)
+            img_gt = self.mask_img_trsf(img_gt, rng)
+            if dir_name not in self.preds.keys():
+                self.preds[dir_name] =  self.read_pickle(dir_name)
+
+            preds = self.preds[dir_name]
             if preds[sidx] is None:
                 print(f'preds[{sidx}] is None:', dir_name)
                 return None
@@ -255,8 +266,10 @@ class LipGanDS(Dataset):
         
         img_ips = []
         for ip_fname in ip_fnames:
-            #img_ip = cv2.imread(os.path.join(dir_name, ip_fname))
-            img_ip = cv2.imread(ip_fname)
+            if gt_audio_only:
+                img_ip = img_gt # black image 니까 돌려쓰자.
+            else:
+                img_ip = cv2.imread(str(ip_fname))
             img_ip = resize_adapt(args, img_ip)
             img_ip = self.mask_img_trsf(img_ip, rng)
             img_ip = img_ip * 2.0 / 255.0 - 1.0
