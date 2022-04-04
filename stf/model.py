@@ -50,28 +50,31 @@ def create_model(config_path, checkpoint_path, work_root_path, device, verbose=F
         
     args = read_config(config_path)
     model = ae.Speech2Face(3, (3, args.img_size, args.img_size), (1, 96, args.mel_step_size))
-    #print('1 model , gc:',  sys.getrefcount(model), ', referres cnt:', len(gc.get_referrers(model)))
     
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     if 'state_dict' in checkpoint:
         model.load_state_dict(checkpoint['state_dict'])
     else:
         model.load_state_dict(checkpoint)
-    model.to(device).eval()
-    #print('2 model , gc:',  sys.getrefcount(model), ', referres cnt:', len(gc.get_referrers(model)))
+    if device == 'cuda' and torch.cuda.device_count() > 1:
+        gpus = list(range(torch.cuda.device_count()))
+        print('Multi GPU activate, gpus : ', gpus)
+        model = torch.nn.DataParallel(model, device_ids=gpus)
+        model.to(device)
+        model.eval()
+    else:
+        model.to(device).eval()
     
     model_data = ModelInfo(model=model, args=args, device=device,
                            work_root_path=work_root_path,
                            config_path=config_path,
                            checkpoint_path=checkpoint_path,
                            verbose=verbose)
-    #print('3 model , gc:',  sys.getrefcount(model), ', referres cnt:', len(gc.get_referrers(model)))
     del checkpoint
     gc.collect()
     if verbose:
         print('load model complete')
     
-    #print('4 model , gc:',  sys.getrefcount(model), ', referres cnt:', len(gc.get_referrers(model)))
     return model_data
 
 
