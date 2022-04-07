@@ -15,6 +15,7 @@ from . import face_finder as ff
 import face_alignment
 import imageio_ffmpeg
 from stf.util import callback_inter
+import os
 
 
 g_detector_fan = None
@@ -298,7 +299,7 @@ def save_debug_clip(clip, fps):
     clip_debug.write_videofile(save_path, logger=None)
     return save_path 
 
-
+    
 def crop_and_save(path, df_fan, offset_y, margin, clip_dir, callback, verbose=False):
     df_fan = df_fan.copy()
     
@@ -449,3 +450,127 @@ def save_crop_info2(anchor_box_path, mp4_path, out_dir, make_mp4=False,
         print('saved debug_mp4:', debug_clip_path )
         
     return pickle_path
+
+
+# save_crop_info2 와 차이점 : 이미지를 resize해서 저장한다.
+def save_crop_info3(anchor_box_path, mp4_path, out_dir, img_size, make_mp4=False, 
+                    crop_offset_y = -0.1, crop_margin=0.4, callback=None, verbose=False):
+    
+    callback1 = callback_inter(callback, min_per=0, max_per=5, desc='save_crop_info2 - 1', verbose=verbose)
+    callback2 = callback_inter(callback, min_per=5, max_per=70, desc='save_crop_info2 - 2', verbose=verbose)
+    callback3 = callback_inter(callback, min_per=70, max_per=100, desc='save_crop_info2 - 3', verbose=verbose)
+    
+    df_anchor_i = pd.read_pickle(anchor_box_path)
+    
+    # 얼굴이 모두 들어가는 박스 크기를 구한다.
+    # 여기서 구한 박스에서만 fan 이 얼굴과 피처 포인트를 구한다.
+    box = get_anchor_box(df_anchor_i, offset_y=0, margin=1.0)
+    
+    min_idx, max_idx = df_anchor_i['frame_idx'].values[[0, -1]]
+    
+    clip_dir = Path(out_dir)/Path(anchor_box_path).stem
+    Path(clip_dir).mkdir(exist_ok=True, parents=True)
+    
+    try:
+        save_audio(mp4_path, f'{clip_dir}/audio.wav')
+        save_debug_audio(mp4_path, min_idx, max_idx, f'{clip_dir}/audio_debug.wav')
+    except:
+        # inference 때는 음성 없는 비디오가 들어온다.
+        pass
+    
+    pickle_path = f'{clip_dir}/df_fan.pickle'
+    if Path(pickle_path).exists():
+        return pickle_path
+    
+    callback1(100)
+    
+    # FAN 이 얼굴과 피처 포인트를 구한다.
+    df = df_fan_info2(mp4_path, box, callback2, verbose=verbose)
+    
+    # 모델에 입력할 박스를 다시 구해서 crop 한다.
+    # crop 박스 영역은 피쳐 포인트 기반으로 구한다.
+    df = crop_and_save(mp4_path, df,
+                       offset_y=crop_offset_y,
+                       margin=crop_margin,
+                       clip_dir=clip_dir,
+                       callback=callback3,
+                       verbose=verbose)
+    
+    if df is None:
+        return None
+
+    resize_for_model(img_size, clip_dir, verbose=verbose)
+
+    df.to_pickle(pickle_path)
+    with open(pickle_path.replace('.pickle', '.txt'), 'w') as f:
+        f.write('success')
+    
+    if make_mp4:
+        meta = ff.video_meta(mp4_path)
+        debug_clip_path = save_debug_clip(clip_dir, meta['fps'])
+        print('saved debug_mp4:', debug_clip_path )
+        
+    return pickle_path
+
+
+def inter_alg_(w, h, img):
+    if w*h < img.shape[0] * img.shape[1]:
+        return cv2.INTER_AREA
+    else:
+        return cv2.INTER_CUBIC
+    
+    
+def inter_alg(target_size, img):
+    if isinstance(target_size, tuple):
+        w, h = target_size
+    else:
+        w, h = target_size, target_size
+    return inter_alg_(w,h, img)
+
+
+# img_size : int
+def resize_adapt(img_size, img):
+    sz = img_size
+    h, w = img.shape[:2]
+    if True:
+    #if sz < max(h, w):
+        r = sz/max(h,w)
+        h, w = int(round(r*h)), int(round(r*w))
+        img = cv2.resize(img, (w, h), inter_alg(sz, img))
+    return img
+
+
+def read_pickle_preds(dir_name):
+    df = pd.read_pickle(dir_name/'df_fan.pickle')
+    preds = df.set_index('frame_idx')['cropped_pts2d']
+    #g_cached_pickle[str(dir_name)] = preds
+    return preds
+
+
+def masking(im, pts):
+    h, w = im.shape[:2]
+    im = cv2.fillPoly(im, [pts], (128,128,128))
+    return im
+
+
+# img_size : (w,h)
+def resize_for_model(img_size, clip_dir, verbose=False):
+    assert(type(img_size) == int)
+    fs = glob(str(clip_dir)+'/*.jpg')
+    if verbose:
+        print('resize to:', img_size)
+        print('image len:', len(fs))
+        print(str(clip_dir))
+    
+    d = os.path.dirname(fs[0])
+    resize_d = f'{d}.resized'
+    if verbose:
+        print(resize_d)
+    os.makedirs(resize_d, exist_ok=True)
+    for f in tqdm(fs, desc='■ resize ', disable=not verbose):
+        img = cv2.imread(str(f))
+        img = resize_adapt(img_size, img)
+        f = os.path.basename(f)
+        cv2.imwrite(f'{resize_d}/{f}', img, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
+
+#resize_for_model(352, './stf_api_temp_root/preprocess/hunet_v1_side/crop_video_자연스러움_사복_측면/자연스러움_사복_측면_000')
