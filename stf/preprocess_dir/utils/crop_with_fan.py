@@ -90,21 +90,22 @@ def get_anchor_box(df_anchor, offset_y, margin, size_stride = 32, verbose=False)
     
     #######################################
     # 박스가 하나 뿐이면 죽는 문제 수정.
+    # xs 혹은 ys 의 값이 모두 같은 값이어서 z 가 nan이되서 죽는 문제 수정
     if len(center_xs) > 1:
-        center_x = np.mean([x for z, x in zip(stats.zscore(center_xs), center_xs) if abs(z) < 3]).round().astype(np.int)
+        center_x = np.mean([x for z, x in zip(stats.zscore(center_xs), center_xs) if abs(z) < 3 or math.isnan(z)]).round().astype(np.int)
     else:
         center_x = np.mean(center_xs).round().astype(np.int)
     if len(center_ys) > 1:
-        center_y = np.mean([y for z, y in zip(stats.zscore(center_ys), center_ys) if abs(z) < 3])
+        center_y = np.mean([y for z, y in zip(stats.zscore(center_ys), center_ys) if abs(z) < 3 or math.isnan(z)])
     else:
         center_y = np.mean(center_ys).round().astype(np.int)
     center_y = int(round(center_y*(1+offset_y)))
     if len(size_xs) > 1:
-        size_x   = np.mean([x for z, x in zip(stats.zscore(size_xs),   size_xs) if abs(z) < 3]).round().astype(np.int)
+        size_x   = np.mean([x for z, x in zip(stats.zscore(size_xs),   size_xs) if abs(z) < 3 or math.isnan(z)]).round().astype(np.int)
     else:
         size_x   = np.mean(size_xs).round().astype(np.int)
     if len(size_ys) > 1:
-        size_y   = np.mean([y for z, y in zip(stats.zscore(size_ys),   size_ys) if abs(z) < 3]).round().astype(np.int)
+        size_y   = np.mean([y for z, y in zip(stats.zscore(size_ys),   size_ys) if abs(z) < 3 or math.isnan(z)]).round().astype(np.int)
     else:
         size_y   = np.mean(size_ys).round().astype(np.int)
 
