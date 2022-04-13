@@ -16,6 +16,7 @@ import face_alignment
 import imageio_ffmpeg
 from stf.util import callback_inter
 import os
+import torch
 
 
 g_detector_fan = None
@@ -30,6 +31,18 @@ def init_fan(device='cuda:0'):
     if g_detector_fan3d is None:
         g_detector_fan3d = face_alignment.FaceAlignment(face_alignment.LandmarksType._3D, flip_input=False, device=device)
 
+
+def del_fan():
+    global g_detector_fan
+    global g_detector_fan3d
+    if g_detector_fan is not None:
+        del g_detector_fan
+        g_detector_fan = None
+        
+    if g_detector_fan3d is None:
+        del g_detector_fan3d
+        g_detector_fan3d = None
+    torch.cuda.empty_cache()
 
 def fan_box(pred, img, type3d):
     if type3d:

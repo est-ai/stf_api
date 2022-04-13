@@ -34,6 +34,19 @@ def init_face_finder(device='cuda:0'):
         g_device = device
 
 
+def del_face_finder():
+    global g_mtcnn
+    global g_recognizer
+    global g_device    
+    if g_mtcnn is not None:
+        del g_mtcnn
+        g_mtcnn = None
+    if g_recognizer is not None:
+        del g_recognizer
+        g_recognizer = None
+    torch.cuda.empty_cache()
+
+
 def find_face(img):
     """ 얼굴 위치 및 임베딩 벡터 구하기 
         Arguments:
