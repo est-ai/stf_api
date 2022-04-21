@@ -511,8 +511,10 @@ def get_compose_func(template, verbose=False):
     inter_alg = cv2.INTER_AREA if x2-x1+1 < img_size else cv2.INTER_CUBIC 
     
     def compose_one(model_out, full_img):
+        #pdb.set_trace()
         # 1. resize
-        img = cv2.resize(model_out, (x2-x1+1, y2-y1+1), inter_alg)
+        #img = cv2.resize(model_out, (x2-x1+1, y2-y1+1), inter_alg)
+        img = resize_adapt(model_out, (x1,y1,x2,y2))
         # 2. 붙여넣기
         c, f = img, full_img
         out_memory = full_img.copy()
@@ -520,6 +522,33 @@ def get_compose_func(template, verbose=False):
         return out_memory
     
     return compose_one
+
+def resize_adapt(model_out, crop_region):
+    def inter_alg(target_size, img):
+        if isinstance(target_size, tuple):
+            w, h = target_size
+        else:
+            w, h = target_size, target_size
+        return inter_alg_(w,h, img)
+
+    def inter_alg_(w, h, img):
+        if w*h < img.shape[0] * img.shape[1]:
+            return cv2.INTER_AREA
+        else:
+            return cv2.INTER_CUBIC
+
+    x1, y1, x2, y2 = crop_region
+    h, w = y2-y1+1, x2-x1+1
+    sz = model_out.shape[0] # h,w 동일하다.
+    if h == sz and w == sz:
+        return model_out
+   
+    r = max(h,w)/sz
+    max_hw = max(h,w)
+    
+    temp_ = cv2.resize(model_out, (max_hw, max_hw), inter_alg(max_hw, model_out))
+    temp_ = temp_[(max_hw-h)//2:(max_hw-h)//2+h, (max_hw-w)//2:(max_hw-w)//2+w]
+    return temp_
 
 
 # model inference, template video frame와 inference 결과 합성, 비디오 생성 작업을 한다.
