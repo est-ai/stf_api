@@ -84,10 +84,11 @@ def face_detect_fan_(img, type3d):
 
 
 def face_detect_fan(img, type3d = False):
-    try:
-        return face_detect_fan_(img, type3d)
-    except:
-        return None, None 
+    #try:
+    #    return face_detect_fan_(img, type3d)
+    #except:
+    #    return None, None 
+    return face_detect_fan_(img, type3d)
     
 def get_anchor_box(df_anchor, offset_y, margin, size_stride = 32, verbose=False):
     # 면적 평균을 구하고 너무(?) 작거나 큰 얼굴은 제거
