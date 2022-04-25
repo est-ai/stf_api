@@ -16,6 +16,7 @@ import face_alignment
 import imageio_ffmpeg
 from stf.util import callback_inter
 import os
+import torch
 
 
 g_detector_fan = None
@@ -30,6 +31,18 @@ def init_fan(device='cuda:0'):
     if g_detector_fan3d is None:
         g_detector_fan3d = face_alignment.FaceAlignment(face_alignment.LandmarksType._3D, flip_input=False, device=device)
 
+
+def del_fan():
+    global g_detector_fan
+    global g_detector_fan3d
+    if g_detector_fan is not None:
+        del g_detector_fan
+        g_detector_fan = None
+        
+    if g_detector_fan3d is None:
+        del g_detector_fan3d
+        g_detector_fan3d = None
+    torch.cuda.empty_cache()
 
 def fan_box(pred, img, type3d):
     if type3d:
@@ -71,10 +84,11 @@ def face_detect_fan_(img, type3d):
 
 
 def face_detect_fan(img, type3d = False):
-    try:
-        return face_detect_fan_(img, type3d)
-    except:
-        return None, None 
+    #try:
+    #    return face_detect_fan_(img, type3d)
+    #except:
+    #    return None, None 
+    return face_detect_fan_(img, type3d)
     
 def get_anchor_box(df_anchor, offset_y, margin, size_stride = 32, verbose=False):
     # 면적 평균을 구하고 너무(?) 작거나 큰 얼굴은 제거
@@ -91,21 +105,22 @@ def get_anchor_box(df_anchor, offset_y, margin, size_stride = 32, verbose=False)
     
     #######################################
     # 박스가 하나 뿐이면 죽는 문제 수정.
+    # xs 혹은 ys 의 값이 모두 같은 값이어서 z 가 nan이되서 죽는 문제 수정
     if len(center_xs) > 1:
-        center_x = np.mean([x for z, x in zip(stats.zscore(center_xs), center_xs) if abs(z) < 3]).round().astype(np.int)
+        center_x = np.mean([x for z, x in zip(stats.zscore(center_xs), center_xs) if abs(z) < 3 or math.isnan(z)]).round().astype(np.int)
     else:
         center_x = np.mean(center_xs).round().astype(np.int)
     if len(center_ys) > 1:
-        center_y = np.mean([y for z, y in zip(stats.zscore(center_ys), center_ys) if abs(z) < 3])
+        center_y = np.mean([y for z, y in zip(stats.zscore(center_ys), center_ys) if abs(z) < 3 or math.isnan(z)])
     else:
         center_y = np.mean(center_ys).round().astype(np.int)
     center_y = int(round(center_y*(1+offset_y)))
     if len(size_xs) > 1:
-        size_x   = np.mean([x for z, x in zip(stats.zscore(size_xs),   size_xs) if abs(z) < 3]).round().astype(np.int)
+        size_x   = np.mean([x for z, x in zip(stats.zscore(size_xs),   size_xs) if abs(z) < 3 or math.isnan(z)]).round().astype(np.int)
     else:
         size_x   = np.mean(size_xs).round().astype(np.int)
     if len(size_ys) > 1:
-        size_y   = np.mean([y for z, y in zip(stats.zscore(size_ys),   size_ys) if abs(z) < 3]).round().astype(np.int)
+        size_y   = np.mean([y for z, y in zip(stats.zscore(size_ys),   size_ys) if abs(z) < 3 or math.isnan(z)]).round().astype(np.int)
     else:
         size_y   = np.mean(size_ys).round().astype(np.int)
 
@@ -180,6 +195,12 @@ def crop(frames, df_fan, offset_y, margin):
     x1, y1, x2, y2 = np.array([x1, y1, x2, y2]).round().astype(np.int)
     
     #print((x1, y1, x2, y2), ((x2-x1+1), (y2-y1+1)))
+    
+    # TODO snow: 박스가 이미지를 넘어서는 경우에 대한 방어코드
+    # 방어코드를 넣긴했는데, 이렇게 되면 얼굴이 찌그러져서 학습이된다.
+    # 추후 고민해봐야 한다.
+    frame_shape = frames[0].shape
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(x2, frame_shape[1]-1), min(y2, frame_shape[0]-1)
     
     cropped_frames = {} 
     cropped_pts2ds = []
@@ -328,6 +349,11 @@ def crop_and_save(path, df_fan, offset_y, margin, clip_dir, callback, verbose=Fa
     meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
     frame_size = meta['size']
     
+    # TODO snow: 박스가 이미지를 넘어서는 경우에 대한 방어코드
+    # 방어코드를 넣긴했는데, 이렇게 되면 얼굴이 찌그러져서 학습이된다.
+    # 추후 고민해봐야 한다.
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(x2, frame_size[0]-1), min(y2, frame_size[1]-1)
+        
     cropped_pts2ds = []
     for (_, pts2d, _,  frame_idx), f in tqdm(zip(df_fan.values, reader), total=len(df_fan), desc='crop_and_save', disable=not verbose):
         f = np.frombuffer(f, dtype=np.uint8)

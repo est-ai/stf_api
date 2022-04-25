@@ -64,8 +64,6 @@ def preprocess_template(config_path,
                         device,
                         callback=None,
                         verbose=False):  
-    ff.init_face_finder(device)
-    cwf.init_fan(device)
     config = read_config(config_path)
     
     callback1 = callback_inter(callback, min_per=0, max_per=2,
@@ -85,6 +83,9 @@ def preprocess_template(config_path,
     crop_mp4 = get_crop_mp4_dir(preprocess_dir, template_video_path)
 
     if not Path(crop_mp4).exists():
+        ff.init_face_finder(device)
+        cwf.init_fan(device)
+        
         if verbose:
             print('템플릿 비디오 처리 ... ')
         #아나운서 얼굴 정보를 구한다.
@@ -110,10 +111,14 @@ def preprocess_template(config_path,
         # snow : for debug
         if verbose:
             print('df_fan_path: ', df_fan_path)
+        ff.del_face_finder()
+        cwf.del_fan()
+            
     else:
         if verbose:
             print('전처리가 이미 되어있음')
     callback3(100)
+    
     gc.collect()
     
     
