@@ -453,7 +453,8 @@ def write_video2(out_path, compose_func, model_out, full_frames,
                                          ffmpeg_log_level='debug',
                                          quality = 10, # 0~10
                                          output_params=ffmpeg_params,
-                                         audio_path = wav_path, )
+                                         audio_path = wav_path,
+                                         macro_block_size=1,)
     
     writer.send(None)  # seed the generator
     out_memory_shape = full_frames[0].shape
@@ -639,7 +640,8 @@ def write_video3(out_path, compose_func, model_out, template_video_path,
                                          ffmpeg_log_level='error',
                                          quality = 10, # 0~10
                                          output_params=ffmpeg_params,
-                                         audio_path = wav_path, )
+                                         audio_path = wav_path,
+                                         macro_block_size=1,)
     
     writer.send(None)  # seed the generator
     try:
@@ -713,7 +715,8 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
                                          ffmpeg_log_level='error',
                                          quality = 10, # 0~10
                                          output_params=ffmpeg_params,
-                                         audio_path = wav_path, )
+                                         audio_path = wav_path, 
+                                         macro_block_size=1,)
     
     writer.send(None)  # seed the generator
     try:
