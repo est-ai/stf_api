@@ -82,6 +82,16 @@ def resize_adapt(args, img):
     board[(sz-h)//2:(sz-h)//2+h, (sz-w)//2:(sz-w)//2+w] = img
     return board
 
+
+def resize_adapt_pts(args, img, pts):
+    sz = args.img_size
+    h, w = img.shape[:2]
+    r = sz/max(h,w)
+    pts = pts * r
+    pts = np.round(np.array(pts)).astype(np.int32)
+    return pts
+
+
 def masking(im, pts):
     h, w = im.shape[:2]
     im = cv2.fillPoly(im, [pts], (128,128,128))
@@ -242,6 +252,7 @@ class LipGanDS(Dataset):
             masked = np.zeros((args.img_size,args.img_size,3), np.uint8)
             img_gt = masked
             pts = None
+            masked = resize_adapt(args, masked)
         else:
             #print(str(img_name)+'.resized.jpg')
             img_gt = cv2.imread(str(img_name))
@@ -260,9 +271,9 @@ class LipGanDS(Dataset):
             mask_ver = random.choice(self.mask_ver)
             randomness = False if self.phase == 'val' else True
             pts = calc_poly[mask_ver](preds[sidx], masked.shape[0], randomness)
-            
+            pts = resize_adapt_pts(args, masked, pts)
+            masked = resize_adapt(args, masked)
             masked = masking(masked, pts)
-        masked = resize_adapt(args, masked)
         
         img_ips = []
         for ip_fname in ip_fnames:
@@ -311,3 +322,4 @@ def datagen(args, phase, shuffle, drop_last = True):
                 
     return inner, len(dl) # len(ds)//batch_size
         
+
