@@ -10,6 +10,7 @@ import pdb
 
 from .mask_history import calc_poly
 from .transform_history import mask_img_trsfs 
+from scipy.interpolate import interp1d
 
 # snow : LipGanDS.__init__ 에서 계하도록 변경됨
 #half_window_size = 4
@@ -97,6 +98,38 @@ def masking(im, pts):
     im = cv2.fillPoly(im, [pts], (128,128,128))
     return im
 
+
+def smoothing_mask(pts):
+    pts = np.array(pts)
+    x = list(pts[:,0])
+    y = list(pts[:,1])
+    x = x + [x[0]]
+    y = y + [y[0]]
+
+    # Pad the x and y series so it "wraps around".
+    # Note that if x and y are numpy arrays, you'll need to
+    # use np.r_ or np.concatenate instead of addition!
+    orig_len = len(x)
+    x = x[-3:-1] + x + x[1:3]
+    y = y[-3:-1] + y + y[1:3]
+
+    t = np.arange(len(x))
+    ti = np.linspace(2, orig_len + 1, 10 * orig_len)
+
+    xi = interp1d(t, x, kind='cubic')(ti)
+    yi = interp1d(t, y, kind='cubic')(ti)
+    v = np.stack((xi, yi), axis=1)
+    v = v.astype(np.int)
+
+    #fig, ax = plt.subplots()
+    #ax.plot(xi, yi)
+    #ax.plot(x, y)
+    #ax.margins(0.05)
+    #plt.show()
+
+    return v[:-1]
+
+
 def id_map(x, rng = None):
     return x
 
@@ -119,6 +152,10 @@ class LipGanDS(Dataset):
         self.mel_norm_ver = args.mel_norm_ver
         self.mels = {}
         self.preds = {}
+
+        self.smoothing_mask = True if args.smoothing_mask else False
+        if self.smoothing_mask:
+            print('!! smoothing_mask is True !!')
 
         
         #self.half_window_size = self.calc_half_window_size(args.fps) 
@@ -273,6 +310,9 @@ class LipGanDS(Dataset):
             pts = calc_poly[mask_ver](preds[sidx], masked.shape[0], randomness)
             pts = resize_adapt_pts(args, masked, pts)
             masked = resize_adapt(args, masked)
+
+            if self.smoothing_mask:
+                pts = smoothing_mask(pts)
             masked = masking(masked, pts)
         
         img_ips = []
