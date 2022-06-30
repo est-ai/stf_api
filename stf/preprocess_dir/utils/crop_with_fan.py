@@ -345,7 +345,8 @@ def crop_and_save(path, df_fan, offset_y, margin, clip_dir, callback, verbose=Fa
     x1, y1, x2, y2 = np.array([x1, y1, x2, y2]).round().astype(np.int)
     
     #print((x1, y1, x2, y2), ((x2-x1+1), (y2-y1+1)))
-    reader = imageio_ffmpeg.read_frames(str(path))
+    reader = imageio_ffmpeg.read_frames(path=str(path))
+    
     meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
     frame_size = meta['size']
     
@@ -358,6 +359,7 @@ def crop_and_save(path, df_fan, offset_y, margin, clip_dir, callback, verbose=Fa
     for (_, pts2d, _,  frame_idx), f in tqdm(zip(df_fan.values, reader), total=len(df_fan), desc='crop_and_save', disable=not verbose):
         f = np.frombuffer(f, dtype=np.uint8)
         f = f.reshape(frame_size[1], frame_size[0], 3)
+        #f = f.reshape(frame_size[1], frame_size[0], 4) #hojin
         if pts2d is not None:
             cropped_pts2ds.append(pts2d - (x1, y1))
         else:
@@ -366,6 +368,65 @@ def crop_and_save(path, df_fan, offset_y, margin, clip_dir, callback, verbose=Fa
         
         name = f"""{frame_idx:05d}_{'yes' if pts2d is not None else 'no'}.jpg"""
         cv2.imwrite(str(Path(clip_dir)/str(name)), cropped_frame[:,:,[2,1,0]], [int(cv2.IMWRITE_JPEG_QUALITY), 100])
+        callback((frame_idx+1)/len(df_fan) * 100)
+        
+    df_fan['cropped_pts2d'] = cropped_pts2ds 
+    df_fan['cropped_box'] = [np.array([x1, y1, x2, y2])]*len(df_fan)
+    df_fan['cropped_size'] = size
+    return df_fan
+
+# hojin
+# crop to png(rgba)
+def crop_and_save2(path, df_fan, offset_y, margin, clip_dir, callback, verbose=False):
+    df_fan = df_fan.copy()
+    
+    #ToDo: None을 제거해야 됨. crash 발생
+    pts2ds = [e for e in df_fan['pts2d'].values if e is not None]
+    if len(pts2ds):
+        pts2ds = np.stack(pts2ds)
+        x1, y1 = pts2ds[:,:,0].min(), pts2ds[:,:,1].min()
+        x2, y2 = pts2ds[:,:,0].max(), pts2ds[:,:,1].max()
+    else:
+        return None, None
+    
+    cx, cy = (x1+x2)/2, (y1+y2)/2
+    sx, sy = (x2-x1+1)*(1+margin), (y2-y1+1)*(1+margin)
+    x1, y1 = cx-sx/2, cy-sy/2
+    x2, y2 = cx+sx/2, cy+sy/2
+    
+    
+    size = (x2-x1+1)
+    offset_y = int(round(size*offset_y))
+    y1 = y1 + offset_y
+    y2 = y1 + size
+    x1, y1, x2, y2 = np.array([x1, y1, x2, y2]).round().astype(np.int)
+    
+    #print((x1, y1, x2, y2), ((x2-x1+1), (y2-y1+1)))
+    reader = imageio_ffmpeg.read_frames(path=str(path), 
+                                        pix_fmt="rgba",
+                                        input_params=["-c:v", "libvpx"],
+                                        bits_per_pixel=32)
+    
+    meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+    frame_size = meta['size']
+    
+    # TODO snow: 박스가 이미지를 넘어서는 경우에 대한 방어코드
+    # 방어코드를 넣긴했는데, 이렇게 되면 얼굴이 찌그러져서 학습이된다.
+    # 추후 고민해봐야 한다.
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(x2, frame_size[0]-1), min(y2, frame_size[1]-1)
+        
+    cropped_pts2ds = []
+    for (_, pts2d, _,  frame_idx), f in tqdm(zip(df_fan.values, reader), total=len(df_fan), desc='crop_and_save2', disable=not verbose):
+        f = np.frombuffer(f, dtype=np.uint8)
+        f = f.reshape(frame_size[1], frame_size[0], 4) #hojin
+        if pts2d is not None:
+            cropped_pts2ds.append(pts2d - (x1, y1))
+        else:
+            cropped_pts2ds.append(None)
+        cropped_frame = f[y1:y2+1, x1:x2+1].copy()
+        
+        name = f"""{frame_idx:05d}_{'yes' if pts2d is not None else 'no'}.png""" #hojin
+        cv2.imwrite(str(Path(clip_dir)/str(name)), cropped_frame[:,:,[2,1,0,3]], [int(cv2.IMWRITE_PNG_COMPRESSION), 0]) #hojin
         callback((frame_idx+1)/len(df_fan) * 100)
         
     df_fan['cropped_pts2d'] = cropped_pts2ds 
@@ -422,7 +483,7 @@ def df_fan_info2(path, box, callback=None, verbose=False):
 
 # save_crop_info 와 기능은 동일하고, 메모리 사용량을 줄인 것
 def save_crop_info2(anchor_box_path, mp4_path, out_dir, make_mp4=False, 
-                    crop_offset_y = -0.1, crop_margin=0.4, callback=None, verbose=False):
+                    crop_offset_y = -0.1, crop_margin=0.4, callback=None, verbose=False, is_webm=False):
     
     callback1 = callback_inter(callback, min_per=0, max_per=5, desc='save_crop_info2 - 1', verbose=verbose)
     callback2 = callback_inter(callback, min_per=5, max_per=70, desc='save_crop_info2 - 2', verbose=verbose)
@@ -457,15 +518,24 @@ def save_crop_info2(anchor_box_path, mp4_path, out_dir, make_mp4=False,
     
     # 모델에 입력할 박스를 다시 구해서 crop 한다.
     # crop 박스 영역은 피쳐 포인트 기반으로 구한다.
-    df = crop_and_save(mp4_path, df,
-                       offset_y=crop_offset_y,
-                       margin=crop_margin,
-                       clip_dir=clip_dir,
-                       callback=callback3,
-                       verbose=verbose)
+    if is_webm:
+        df = crop_and_save2(mp4_path, df,
+                           offset_y=crop_offset_y,
+                           margin=crop_margin,
+                           clip_dir=clip_dir,
+                           callback=callback3,
+                           verbose=verbose)
+    else:
+        df = crop_and_save(mp4_path, df,
+                           offset_y=crop_offset_y,
+                           margin=crop_margin,
+                           clip_dir=clip_dir,
+                           callback=callback3,
+                           verbose=verbose)
     if df is None:
         return None
     df.to_pickle(pickle_path)
+    
     with open(pickle_path.replace('.pickle', '.txt'), 'w') as f:
         f.write('success')
     

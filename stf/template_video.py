@@ -63,7 +63,8 @@ def preprocess_template(config_path,
                         work_root_path,
                         device,
                         callback=None,
-                        verbose=False):  
+                        verbose=False,
+                        is_webm=False):  
     config = read_config(config_path)
     
     callback1 = callback_inter(callback, min_per=0, max_per=2,
@@ -88,6 +89,7 @@ def preprocess_template(config_path,
         
         if verbose:
             print('템플릿 비디오 처리 ... ')
+            
         #아나운서 얼굴 정보를 구한다.
         df_face, imgs = ff.find_face(reference_face)
         callback1(100) # 진행율을 알려준다.
@@ -107,19 +109,129 @@ def preprocess_template(config_path,
                                           crop_offset_y = config.crop_offset_y,
                                           crop_margin = config.crop_margin,
                                           callback=callback3,
-                                          verbose=verbose, )
+                                          verbose=verbose, 
+                                          is_webm=is_webm)
         # snow : for debug
         if verbose:
             print('df_fan_path: ', df_fan_path)
         ff.del_face_finder()
         cwf.del_fan()
-            
     else:
         if verbose:
             print('전처리가 이미 되어있음')
     callback3(100)
     
     gc.collect()
+    
+    
+#hojin
+# png frame 추출 + crop
+def save_template_frames(template_video_path,
+                         verbose=False):
+    import os
+    import imageio_ffmpeg
+    import cv2
+    from tqdm import tqdm
+        
+    # hojin: 템플릿을 프레임별로 저장해두기 -> write_video_in_thread에서 reader 사용하지 않기 위함
+    template_frames_path = template_video_path + '_frames'        
+    if not Path(template_frames_path).exists():
+        reader = imageio_ffmpeg.read_frames(template_video_path, 
+                                            pix_fmt="rgba",
+                                            input_params=["-c:v", "libvpx"],
+                                            bits_per_pixel=32)
+
+        meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+        size = meta["size"]
+        if verbose:
+            print(meta)
+
+        total_cnt, _ = imageio_ffmpeg.count_frames_and_secs(template_video_path)
+
+        Path(template_frames_path).mkdir(exist_ok=True, parents=True)
+
+        if verbose:
+            print('template_frames_path: ', template_frames_path)
+        for idx, f in tqdm(enumerate(reader), total=total_cnt, desc='save_frames', disable=not verbose):
+            name = f"""{idx:05d}.png"""
+            f = np.frombuffer(f, dtype=np.uint8) 
+            f = f.reshape(size[1], size[0], 4)
+            cv2.imwrite(str(Path(template_frames_path)/str(name)), f[:,:,[2,1,0,3]], [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
+    else:
+        if verbose:
+            print('전처리가 이미 되어있음')
+    
+    gc.collect()
+#hojin end
+    
+
+def preprocess_template2(config_path,
+                        template_video_path,
+                        reference_face,
+                        work_root_path,
+                        device,
+                        callback=None,
+                        verbose=False,
+                        is_webm=False):
+    config = read_config(config_path)
+    
+    callback1 = callback_inter(callback, min_per=0, max_per=2,
+                               desc='preprocess_template 1', verbose=verbose)
+    callback2 = callback_inter(callback, min_per=2, max_per=20,
+                               desc='preprocess_template 2', verbose=verbose)
+    callback3 = callback_inter(callback, min_per=20, max_per=100,
+                               desc='preprocess_template 3', verbose=verbose)
+    
+    preprocess_dir = get_preprocess_dir(work_root_path, config.name)
+    Path(preprocess_dir).mkdir(exist_ok=True, parents=True)
+    # snow : for debug
+    if verbose:
+        print('preprocess_dir: ', preprocess_dir, ', work_root_path:', work_root_path)
+    
+    # 전처리 파일 경로
+    crop_mp4 = get_crop_mp4_dir(preprocess_dir, template_video_path)
+
+    if not Path(crop_mp4).exists():
+        ff.init_face_finder(device)
+        cwf.init_fan(device)
+        
+        if verbose:
+            print('템플릿 비디오 처리 ... ')
+            
+        #아나운서 얼굴 정보를 구한다.
+        df_face, imgs = ff.find_face(reference_face)
+        callback1(100) # 진행율을 알려준다.
+        
+        g_anchor_ebd = df_face['ebd'].values[0]
+        # 템플릿 동영상에서 아나운서 얼굴 위치만 저장해 놓는다
+        df_paths = ff.save_face_info3(template_video_path, g_anchor_ebd, base=preprocess_dir,
+                                      callback=callback2, verbose=verbose)
+
+        ### 얼굴 영역을 FAN 랜드마크 기반으로 크롭해 놓는다
+        assert len(df_paths) == 1
+        if verbose:
+            print('cwf.save_crop_info2 --')
+            print('webm: ', is_webm)
+        df_fan_path = cwf.save_crop_info2(anchor_box_path=df_paths[0],
+                                          mp4_path=template_video_path,
+                                          out_dir=crop_mp4,
+                                          crop_offset_y = config.crop_offset_y,
+                                          crop_margin = config.crop_margin,
+                                          callback=callback3,
+                                          verbose=verbose, 
+                                          is_webm=is_webm)
+        # snow : for debug
+        if verbose:
+            print('df_fan_path: ', df_fan_path)
+        ff.del_face_finder()
+        cwf.del_fan()
+    else:
+        if verbose:
+            print('전처리가 이미 되어있음')
+    callback3(100)
+    
+    gc.collect()
+    
     
     
 class TemplateVideo():
@@ -209,7 +321,7 @@ class TemplateVideo():
 
 
     def gen4(self, wav_path, wav_std, wav_std_ref_wav, video_start_offset_frame,
-             head_only=False, slow_write=True, out_path=None, callback=None):
+             head_only=False, slow_write=True, out_path=None, callback=None, is_webm=False):
         if out_path is None:
             out_path = 'temp.mp4'
         return gen_video4(self,
@@ -221,7 +333,8 @@ class TemplateVideo():
                          head_only=head_only,
                          slow_write=slow_write,
                          callback=callback,
-                         verbose=self.verbose)
+                         verbose=self.verbose,
+                         is_webm=is_webm)
 
         
 def template_video(model, template_video_path, callback, read_full_frame=False, verbose=False):

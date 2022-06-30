@@ -211,6 +211,8 @@ class LipGanDS(Dataset):
     def get_frames(self, dir_name):
         if str(dir_name) not in g_cached_frames:
             frames = glob(escape(str(dir_name)) + '/*.jpg')
+            if len(frames) == 0:
+                frames = glob(escape(str(dir_name)) + '/*.png')
             return frames
             g_cached_frames[str(dir_name)] = frames
         return g_cached_frames[str(dir_name)]
@@ -293,6 +295,7 @@ class LipGanDS(Dataset):
         else:
             #print(str(img_name)+'.resized.jpg')
             img_gt = cv2.imread(str(img_name))
+            img_gt = img_gt[:,:,:3]
             masked = self.mask_img_trsf(img_gt.copy(), rng)
 
             img_gt = resize_adapt(args, img_gt)
@@ -321,6 +324,7 @@ class LipGanDS(Dataset):
                 img_ip = img_gt # black image 니까 돌려쓰자.
             else:
                 img_ip = cv2.imread(str(ip_fname))
+                img_ip = img_ip[:,:,:3]
             img_ip = resize_adapt(args, img_ip)
             img_ip = self.mask_img_trsf(img_ip, rng)
             img_ip = img_ip * 2.0 / 255.0 - 1.0

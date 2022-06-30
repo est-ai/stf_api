@@ -75,6 +75,49 @@ def audio_crop(wav_std, wav_std_ref_wav, wav_path, crop_wav_dir, video_fps, verb
     return wav_path
 
 
+# hojin
+# create dummy to png
+def audio_crop2(wav_std, wav_std_ref_wav, wav_path, crop_wav_dir, video_fps, verbose=False):
+    shutil.rmtree(crop_wav_dir, ignore_errors=True)
+    Path(crop_wav_dir).mkdir(exist_ok=True, parents=True)
+    
+    ### 오디오 파일을 mels로 변환한다
+    if wav_std and wav_std_ref_wav is not None:
+        sr = 22050
+        w, sr = librosa.load(wav_path)
+        r, sr = librosa.load(wav_std_ref_wav)
+        if verbose:
+            print('*** np.std(w): ', np.std(w))
+        w = (w / np.std(w)) * np.std(r)
+        if verbose:
+            print('*** np.std(w), np.std(r): ', np.std(w), np.std(r))
+        temp_wav = f'{crop_wav_dir}/{Path(wav_path).stem}.{random.randint(0, 10000)}.wav'
+        soundfile.write(temp_wav, w, 22050)
+        wav_path = temp_wav 
+        
+    if verbose:
+        print('[1/5] 오디오 파일 변환 ... ')
+    mels = mm.load_wav_to_mels(wav_path)
+    np.savez_compressed(f'{crop_wav_dir}/mels', spec=mels)
+    
+    # 오디오 클립을 읽어온다
+    au = AudioFileClip(wav_path)
+
+    if verbose:
+        print('[2/5] 오디오 시간에 맞춰 dummy 이미지 저장 ... ')
+    # 오디오 시간만큼 더미 사진을 만든다.
+    image_count = math.floor(au.duration * video_fps)
+    dummy = np.zeros((64,64), np.uint8)
+    for i in range(image_count):
+        imageio.imwrite(f'{crop_wav_dir}/{i:05d}_yes.png',dummy) #hojin
+
+    with open(f'{crop_wav_dir}/fps.txt', 'w') as f:
+        f.write(f'{video_fps}')
+        
+    au.close()
+    del au
+    return wav_path
+
 # model inference 를 위한 파일 목록을 만들어서 결과를 리턴한다.
 def dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav, fps, video_start_offset_frame=None, verbose=False):
     
@@ -91,6 +134,58 @@ def dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav, fps, video_
     
     # 비디오 사진도 더미 갯수만큼 준비한다(갯수는 뒤부터 끊는다)
     images = sorted(glob(f'{template.crop_mp4_dir}/{Path(template_video_path).stem}_000/*.jpg'))
+    if verbose:
+        print('len images:', len(images))
+    first_frame_idx = int(Path(images[0]).stem.split('_')[0])
+    
+    # template video 의 첫번째 이미지는 0 부터 시작해야한다.
+    if first_frame_idx != 0:
+        raise Exception(f'template video have some error:{template_video_path}, first_frame_idx:{first_frame_idx}')
+    
+    # audio 가 template video 보다 너무 길면 에러를 낸다.
+    if len(images) < len(audios) and (VSO is not None and len(images) < len(audios) + VSO):
+        raise Exception('wav is too long than template video')
+    
+    # template video, audio 중 더 짧은쪽에 맞춰 생성한다.
+    len_frame =  min(len(images),len(audios))
+    if verbose:
+        print('len(images), len(audios), len_frame ', len(images), len(audios), len_frame)
+        
+    audios = audios[:len_frame]
+    #images = images[:len_frame]
+    if VSO is None: # 비디오 갯수는 뒤부터 끊는다
+        images = images[-len_frame:]
+    else: # 비디오 갯수는 지정된 숫자부터 끊는다
+        images = images[VSO:VSO+len_frame]
+    duration = len_frame/fps
+    #print(duration, au.duration)
+    au = AudioFileClip(wav_path2)
+    assert duration <= au.duration
+    assert len(audios) == len(images)
+    if verbose:
+        print('len(images), len(audios), len_frame ', len(images), len(audios), len_frame)
+    au.close()
+    del au
+        
+    return sorted(audios) + sorted(images)
+
+# hojin
+# read png
+def dataset_val_images2(template, wav_path, wav_std, wav_std_ref_wav, fps, video_start_offset_frame=None, verbose=False):
+    template_video_path = template.template_video_path
+    VSO = video_start_offset_frame
+    assert(VSO is None or VSO >= 0)
+    
+    crop_wav_dir = os.path.join(template.model.work_root_path, 'temp', template.model.args.name,
+                                f'crop_audio_{Path(wav_path).stem}')
+    wav_path2 = audio_crop(wav_std, wav_std_ref_wav, wav_path, crop_wav_dir, fps, verbose=verbose)
+    
+    # 오디오에 대응되는 더미 사진을 준비한다
+    audios = sorted(glob(f'{crop_wav_dir}/*.jpg'))
+    
+    # 비디오 사진도 더미 갯수만큼 준비한다(갯수는 뒤부터 끊는다)
+    images = sorted(glob(f'{template.crop_mp4_dir}/{Path(template_video_path).stem}_000/*.png'))
+    print(f'{template.crop_mp4_dir}/{Path(template_video_path).stem}_000')
     if verbose:
         print('len images:', len(images))
     first_frame_idx = int(Path(images[0]).stem.split('_')[0])
@@ -694,7 +789,7 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
     if verbose:
         print(meta)
     assert(crop_start_frame_count >= 0)
-    
+
     # crop_start_frame_count 만큼 앞에서 버린다.
     if crop_start_frame_count > 0:
         # 개수를 조정해준다.
@@ -708,7 +803,7 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
         for f, i in zip(reader, range(crop_start_frame_count-1)):
             #print('crop:', i)
             pass
-    
+
     writer = imageio_ffmpeg.write_frames(out_path,
                                          size = size,
                                          fps=fps,
@@ -728,7 +823,6 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
                 print('already None??!!!')
                 break
             #print('worker:', idx, ', th:', threading.get_ident())
-            
             f = np.frombuffer(f, dtype=np.uint8)
             #print(f.shape, size, f.dtype)
             f = f.reshape(size[1], size[0], 3)
@@ -746,9 +840,96 @@ def write_video_in_thread(out_path, compose_func, task_name, template_video_path
         print('exception read template video stream', e)
         raise Exception('except than template video', e)
         pass
-        
+
     writer.close()
     
+    
+# hojin
+# write webm with frames
+def write_video_in_thread2(out_path, compose_func, task_name, template_video_path,
+                 wav_path, fps, crop_start_frame_count, total_cnt,
+                 output_path, slow_write,
+                 verbose=False):
+    global global_v_
+    
+    if verbose:
+        print('[5/5] 비디오 합성 함수... ')
+        print(f"write_video_in_thread2 save video {out_path}")
+    
+    # 합성하면서 비디오 생성
+    ffmpeg_params = []
+    if slow_write:
+        #ffmpeg_params=['-acodec', 'aac', '-preset', 'veryslow', '-crf', '17']
+        ffmpeg_params=['-acodec', 'aac', '-crf', '17']
+
+    # use template frames
+    template_frames_path = template_video_path + '_frames'        
+    template_frames = [os.path.join(template_frames_path, f) for f in os.listdir(template_frames_path)]
+    template_frames = sorted(template_frames)
+    temp_frames = imageio.imread(template_frames[0])
+    size = [temp_frames.shape[1], temp_frames.shape[0]]
+    print('len(temp_frames):', len(temp_frames))
+
+    assert(crop_start_frame_count >= 0)
+
+    # crop_start_frame_count 만큼 앞에서 버린다.
+    if crop_start_frame_count > 0:
+        # 개수를 조정해준다.
+        total_cnt = total_cnt - crop_start_frame_count
+        # model output 버린다.
+        for i in range(crop_start_frame_count):
+            global_v_[task_name].get()
+            #print('crop:', i)
+            pass
+        # TODO snow : 왜인지 모르겠지만, crop_start_frame_count-1 로 해야지만 프레임이 맞는다.
+        template_frames = template_frames[crop_start_frame_count-1:]
+
+    writer = imageio_ffmpeg.write_frames(out_path,
+                                         size = size,
+                                         fps=15, #fps,#
+                                         ffmpeg_log_level='error',
+                                         quality = 10, # 0~10
+                                         # hojin
+                                         pix_fmt_in="rgba",
+                                         pix_fmt_out="yuva420p",
+                                         codec="libvpx",
+                                         bitrate="10M",
+                                         output_params=['-crf', '4', '-auto-alt-ref', '0', '-deadline', 'realtime'],
+                                         #output_params=['-b','37800k', '-vf', 'hflip'], # 좌우 반전 테스트 (완료)
+                                         # hojin end
+                                         audio_path = wav_path, 
+                                         macro_block_size=1,)
+    writer.send(None)  # seed the generator
+    try:
+        for idx, (f, _) in tqdm(enumerate(zip(template_frames, range(total_cnt-crop_start_frame_count))),
+                         total=total_cnt, desc="compose (model out, template)",
+                         disable=not verbose):
+            o = global_v_[task_name].get()
+            if o is None:
+                print('already None??!!!')
+                break
+            if idx % 2 != total_cnt % 2:
+                continue
+            #print('worker:', idx, ', th:', threading.get_ident())
+            f = imageio.imread(f)
+            alpha = f[:,:,3] #hojin: extract alpha channel
+            f = f[:,:,:3] #hojin: use rgb channel
+            frame = compose_func(o, f)
+            frame = np.dstack((frame, alpha)) #hojin: merge alpha channel
+            writer.send(frame)  # seed the generator
+        for _ in tqdm(range(crop_start_frame_count),
+                      total=crop_start_frame_count, desc="compose (model out, template)",
+                      disable=not verbose):
+            frame = compose_func(o, f)
+            frame = np.dstack((frame, alpha)) #hojin: merge alpha channel
+            writer.send(frame)  # seed the generator
+    except Exception as e:
+        print('exception read template video stream', e)
+        raise Exception('except than template video', e)
+        pass
+
+    writer.close()
+        
 
 def get_task_name():
     global global_v_
@@ -769,7 +950,8 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
                head_only=False,
                slow_write=True,
                callback=None,
-               verbose=False):
+               verbose=False,
+               is_webm=False):
     
     #s = time.time()
     global global_v_
@@ -779,10 +961,16 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
     device = template.model.device
     fps = template.fps
     # model inference 를 위한 데이터 준비
-    val_images = dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav,
-                                    fps=fps,
-                                    video_start_offset_frame=video_start_offset_frame,
-                                    verbose=verbose)
+    if is_webm:
+        val_images = dataset_val_images2(template, wav_path, wav_std, wav_std_ref_wav,
+                                        fps=fps,
+                                        video_start_offset_frame=video_start_offset_frame,
+                                        verbose=verbose)
+    else:
+        val_images = dataset_val_images(template, wav_path, wav_std, wav_std_ref_wav,
+                                        fps=fps,
+                                        video_start_offset_frame=video_start_offset_frame,
+                                        verbose=verbose)
     if verbose:
         print('len(val_images) : ', len(val_images))
 
@@ -802,7 +990,10 @@ def gen_video4(template, wav_path, wav_std, wav_std_ref_wav,
     args = (out_path, compose_func, task_name, template.template_video_path,
             wav_path, fps, template.model.args.crop_start_frame, total_cnt,
             out_path, slow_write, verbose)
-    thread = threading.Thread(target=write_video_in_thread, args=args)
+    if is_webm:
+        thread = threading.Thread(target=write_video_in_thread2, args=args)
+    else:
+        thread = threading.Thread(target=write_video_in_thread, args=args)
     thread.start()
     
     # model inference

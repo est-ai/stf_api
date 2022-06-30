@@ -9,17 +9,38 @@ import sys
 
 def main_(args):
     s1 = time.time()
+    
+    is_webm = (args.template_video_path[-4:] == "webm")
 
-    stf.preprocess_template(config_path=args.config_path,
-                            template_video_path=args.template_video_path,
-                            reference_face=args.reference_face,
-                            work_root_path=args.work_root_path,
-                            callback=None,
-                            device=args.device,
-                            verbose=args.verbose)
+    if is_webm:
+        stf.preprocess_template2(config_path=args.config_path,
+                                template_video_path=args.template_video_path,
+                                reference_face=args.reference_face,
+                                work_root_path=args.work_root_path,
+                                callback=None,
+                                device=args.device,
+                                verbose=args.verbose,
+                                is_webm=is_webm)
+    else:
+        stf.preprocess_template(config_path=args.config_path,
+                                template_video_path=args.template_video_path,
+                                reference_face=args.reference_face,
+                                work_root_path=args.work_root_path,
+                                callback=None,
+                                device=args.device,
+                                verbose=args.verbose,
+                                is_webm=is_webm)
+        
     if args.verbose:
         print('1 preprocess_template ')
+        
+    if is_webm:
+        stf.save_template_frames(template_video_path=args.template_video_path,
+                                 verbose=args.verbose)
 
+        if args.verbose:
+            print('1.5 save_template_frames ')
+        
     model = stf.create_model(config_path=args.config_path,
                              checkpoint_path=args.checkpoint_path,
                              work_root_path=args.work_root_path,
@@ -43,6 +64,7 @@ def main_(args):
                  slow_write=False,
                  head_only=False,
                  out_path=args.output,
+                 is_webm=is_webm
                  )
     if args.verbose:
         print('#### total tile: ', time.time() - s1)
@@ -52,14 +74,14 @@ def main_(args):
     
 
 def main(args):
-    try:
+    #try:
         r = main_(args)
         print('end~!! ', r)
-    except:
-        print('exception~!!!!')
-        sys.exit(0)
-        quit()
-    sys.exit(r)
+    #except:
+    #    print('exception~!!!!')
+    #    sys.exit(0)
+    #    quit()
+    #sys.exit(r)
 
     
 if __name__ == '__main__':
