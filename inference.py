@@ -32,7 +32,8 @@ def main_(args):
                                 is_webm=is_webm)
         
     if args.verbose:
-        print('1 preprocess_template ')
+        print(f'!!!!!!!!!!!!!!!!!!! 1 preprocess_template {time.time() - s1:.02f} secs')
+    s2 = time.time()
         
     if is_webm:
         stf.save_template_frames(template_video_path=args.template_video_path,
@@ -47,28 +48,33 @@ def main_(args):
                              device=args.device,
                              verbose=args.verbose)
     if args.verbose:
-        print('2 create_model ')
+        print(f'!!!!!!!!!!!!!!!!!!! 2 create_model {time.time() - s2:.02f} secs')
+    s2 = time.time()
 
     template = stf.template_video(model=model,
                                   template_video_path=args.template_video_path,
                                   callback=None,
                                   verbose=args.verbose)
     if args.verbose:
-        print('3 template_video ')
+        print(f'!!!!!!!!!!!!!!!!!!! 3 template_video {time.time() - s2:.02f} secs' )
     s2 = time.time()
     
-    template.gen4(wav_path=args.wav_path,
-                 wav_std=True,
-                 wav_std_ref_wav=args.wav_std_ref_wav,
-                 video_start_offset_frame=args.video_start_offset_frame, 
-                 slow_write=False,
-                 head_only=False,
-                 out_path=args.output,
-                 is_webm=is_webm
-                 )
+    for i in range(1):
+        s2 = time.time()
+        template.gen4(wav_path=args.wav_path,
+                     wav_std=True,
+                     wav_std_ref_wav=args.wav_std_ref_wav,
+                     video_start_offset_frame=args.video_start_offset_frame, 
+                     slow_write=False,
+                     head_only=False,
+                     out_path=args.output,
+                     is_webm=is_webm
+                     )
+        if args.verbose:
+            print(f'!!!!!!!!!!!!!!!!!!! {i}번째 생성 gen4 {time.time() - s2:.02f} secs')
+            
     if args.verbose:
-        print('#### total tile: ', time.time() - s1)
-        print('#### gen time: ', time.time() - s2)
+        print(f'#### total time: {time.time() - s1:.02f} secs', )
         print('4 gen ')
     return 1
     
@@ -76,7 +82,7 @@ def main_(args):
 def main(args):
     #try:
         r = main_(args)
-        print('end~!! ', r)
+    #    print('end~!! ', r)
     #except:
     #    print('exception~!!!!')
     #    sys.exit(0)
@@ -86,6 +92,7 @@ def main(args):
     
 if __name__ == '__main__':
     
+    s1 = time.time()
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=str, help='output root')
     parser.add_argument('--wav_path', type=str, help='wav_path')
@@ -123,4 +130,7 @@ if __name__ == '__main__':
         sys.exit(0)
 
     main(args)
+    
+    if args.verbose:
+        print(f'#### main total time: {time.time() - s1:.02f} secs', )
 
